@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables (keep .env.example files)
+.env
+.env.local
+.env*.local
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Convex auto-generated
+convex/convex/_generated/
+
+# Claude
+.claude/

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="100%" height="100%">
+  <path d="M 400 190 Q 400 240 450 240 Q 400 240 400 290 Q 400 240 350 240 Q 400 240 400 190 Z" fill="#FFC211" />
+  <path d="M 340 155 Q 340 180 365 180 Q 340 180 340 205 Q 340 180 315 180 Q 340 180 340 155 Z" fill="#FFC211" />
+  <path d="M 435 135 Q 435 165 465 165 Q 435 165 435 195 Q 435 165 405 165 Q 435 165 435 135 Z" fill="#FFC211" />
+  <path d="M 485 185 Q 485 205 505 205 Q 485 205 485 225 Q 485 205 465 205 Q 485 205 485 185 Z" fill="#FFC211" />
+
+  <path d="M 415 520 H 325 A 15 15 0 0 1 310 505 V 295 A 15 15 0 0 1 325 280 H 450 L 490 320 V 430" fill="none" stroke="#102B4E" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+  
+  <path d="M 450 280 V 305 A 15 15 0 0 0 465 320 H 490" fill="none" stroke="#102B4E" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+
+  <line x1="335" y1="345" x2="405" y2="345" stroke="#D4DEE7" stroke-width="10" stroke-linecap="round" />
+  <line x1="335" y1="375" x2="465" y2="375" stroke="#D4DEE7" stroke-width="10" stroke-linecap="round" />
+  <line x1="335" y1="405" x2="465" y2="405" stroke="#D4DEE7" stroke-width="10" stroke-linecap="round" />
+  <line x1="335" y1="435" x2="465" y2="435" stroke="#D4DEE7" stroke-width="10" stroke-linecap="round" />
+  <line x1="335" y1="465" x2="445" y2="465" stroke="#D4DEE7" stroke-width="10" stroke-linecap="round" />
+  <line x1="335" y1="495" x2="405" y2="495" stroke="#D4DEE7" stroke-width="10" stroke-linecap="round" />
+
+  <line x1="475" y1="500" x2="515" y2="540" stroke="#102B4E" stroke-width="24" stroke-linecap="round" />
+  
+  <line x1="485" y1="510" x2="505" y2="530" stroke="#FFC211" stroke-width="8" stroke-linecap="round" />
+  
+  <circle cx="450" cy="475" r="36" fill="#FFFFFF" stroke="#102B4E" stroke-width="12" />
+  
+  <path d="M 432 464 A 22 22 0 0 1 444 454" fill="none" stroke="#FFC211" stroke-width="6" stroke-linecap="round" />
+</svg>
