@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import PdfViewer from "@/components/PdfViewer";
 import { useQuery, useMutation } from "convex/react";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +27,7 @@ import {
   Quote,
   ArrowDownWideNarrow,
   StickyNote,
+  Maximize2,
 } from "lucide-react";
 import type { Paper, PaperId, SectionId } from "@/lib/types";
 
@@ -96,6 +98,8 @@ export default function DocumentPreviewModal({
   // Determines whether the PDF tab should be shown — only for .pdf uploads.
   const isPdf = paper.fileName?.toLowerCase().endsWith(".pdf") ?? false;
   const [activeTab, setActiveTab] = useState<"summary" | "pdf">("summary");
+  // Controls the full-screen PDF overlay rendered via portal.
+  const [isPdfFullscreen, setIsPdfFullscreen] = useState(false);
 
   const assignedSectionIds = useMemo(
     () => new Set(assignments?.map((a) => a.sectionId) ?? []),
@@ -231,6 +235,16 @@ export default function DocumentPreviewModal({
                   {tab}
                 </button>
               ))}
+              {/* Expand to full-screen button — only visible on the PDF tab */}
+              {activeTab === "pdf" && (
+                <button
+                  onClick={() => setIsPdfFullscreen(true)}
+                  className="ml-auto p-1 text-muted-foreground hover:text-foreground transition-colors"
+                  title="Full screen"
+                >
+                  <Maximize2 className="size-3.5" />
+                </button>
+              )}
             </div>
           )}
 
@@ -508,6 +522,32 @@ export default function DocumentPreviewModal({
           )}
         </div>
       </SheetContent>
+
+      {/* ─── Full-screen PDF overlay ─── */}
+      {isPdfFullscreen && isPdf && createPortal(
+        <div className="fixed inset-0 z-50 bg-background flex flex-col">
+          {/* Toolbar with title and close button */}
+          <div className="flex items-center gap-3 px-4 py-2 border-b border-border/30 shrink-0">
+            <h2 className="text-sm font-medium text-foreground/80 truncate flex-1">
+              {paper.title}
+            </h2>
+            <button
+              onClick={() => setIsPdfFullscreen(false)}
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+              title="Close full screen"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          {/* Scrollable PDF centered at a comfortable reading width */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            <div className="max-w-5xl mx-auto">
+              <PdfViewer fileUrl={paper.fileUrl} />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </Sheet>
   );
 }
