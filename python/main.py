@@ -96,7 +96,7 @@ async def process(req: ProcessRequest):
             )
             if identifiers:
                 convex_client.save_identifiers(req.paperId, identifiers)
-            convex_client.save_summary(req.paperId, summary)
+            convex_client.save_summary(req.paperId, summary, language=req.language)
             convex_client.update_status(req.paperId, "completed")
 
         logger.info("Pipeline completed successfully", extra={"step": "pipeline", "status": "completed"})
@@ -173,13 +173,18 @@ async def cite(req: CiteRequest):
                 extra={"step": "extract_text"},
             )
 
+        # Resolve citation language: prefer the language stored on the summary
+        # (set at processing time) so excerpts match the document's own language.
+        # Falls back to the language param on the request (default "en").
+        cite_language = convex_client.get_summary_language(req.paperId) or req.language
+
         # Score only the requested sections and extract excerpts
         with PipelineStep("score_sections", detail=f"num_sections={len(target_sections)}"):
             scores = mapper.score_sections(
                 {},
                 target_sections,
                 extracted["text"],
-                language=req.language,
+                language=cite_language,
             )
             matched = [s for s in scores if s["score"] > 0.0]
             logger.info(

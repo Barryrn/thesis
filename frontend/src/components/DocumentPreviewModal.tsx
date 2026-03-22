@@ -22,6 +22,7 @@ import {
   FileText,
   BookOpen,
   Layers,
+  Loader2,
   Quote,
   ArrowDownWideNarrow,
   StickyNote,
@@ -31,6 +32,9 @@ import type { Paper, PaperId, SectionId } from "@/lib/types";
 interface DocumentPreviewModalProps {
   paper: Paper;
   onClose: () => void;
+  /// Called when the user assigns this paper to a section from the panel.
+  /// Triggers GPT-based citation (same as sidebar drag) and returns when done.
+  onCite: (paperId: PaperId, sectionIds: SectionId[]) => Promise<void>;
 }
 
 const statusLabels: Record<string, { label: string; className: string }> = {
@@ -67,6 +71,7 @@ function formatAuthors(authors: string[]): string {
 export default function DocumentPreviewModal({
   paper,
   onClose,
+  onCite,
 }: DocumentPreviewModalProps) {
   const summary = useQuery(api.summaries.getSummaryByPaper, {
     paperId: paper._id,
@@ -79,13 +84,14 @@ export default function DocumentPreviewModal({
   });
   const sections = useQuery(api.outline.listSections);
 
-  const addMatch = useMutation(api.matches.addMatch);
   const removeMatch = useMutation(api.matches.removeMatch);
 
   const [showRawSummary, setShowRawSummary] = useState(false);
   const [showAddSection, setShowAddSection] = useState(false);
   const [sectionSearch, setSectionSearch] = useState("");
   const [assignmentSort, setAssignmentSort] = useState<"score" | "order">("score");
+  // Tracks which sections are awaiting a /cite response so we can show a spinner.
+  const [citingSectionIds, setCitingSectionIds] = useState<Set<SectionId>>(new Set());
 
   // Determines whether the PDF tab should be shown — only for .pdf uploads.
   const isPdf = paper.fileName?.toLowerCase().endsWith(".pdf") ?? false;
@@ -127,10 +133,21 @@ export default function DocumentPreviewModal({
 
   const status = statusLabels[paper.status] ?? statusLabels.pending;
 
+  /// Assigns this paper to a section and triggers GPT-based citation automatically.
+  /// Shows a spinner on the assigned section row while the /cite request is in flight.
   async function handleAddSection(sectionId: SectionId) {
-    await addMatch({ paperId: paper._id, sectionId, relevanceScore: 1.0 });
+    setCitingSectionIds((prev) => new Set([...prev, sectionId]));
     setShowAddSection(false);
     setSectionSearch("");
+    try {
+      await onCite(paper._id, [sectionId]);
+    } finally {
+      setCitingSectionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(sectionId);
+        return next;
+      });
+    }
   }
 
   async function handleRemoveSection(sectionId: SectionId) {
@@ -438,6 +455,10 @@ export default function DocumentPreviewModal({
                         </span>
 
                         <div className="flex items-center gap-1.5 shrink-0">
+                          {/* Spinner while GPT citation is in flight for this section */}
+                          {citingSectionIds.has(assignment.sectionId) && (
+                            <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                          )}
                           {assignment.isManualOverride && (
                             <span className="text-[9px] text-amber-dim/70 uppercase tracking-wider">
                               Manual

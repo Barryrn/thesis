@@ -17,6 +17,27 @@ HEADERS = {
 }
 
 
+def _query(name: str, args: dict):
+    """Call a Convex query by function name."""
+    logger = get_logger()
+    t0 = time.monotonic()
+    try:
+        res = httpx.post(
+            f"{CONVEX_URL}/api/query",
+            headers=HEADERS,
+            json={"path": name, "args": args},
+            timeout=10,
+        )
+        res.raise_for_status()
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        logger.debug(f"Convex query completed: {name} ({elapsed}ms)")
+        return res.json()
+    except Exception as e:
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        logger.error(f"Convex query failed: {name} ({elapsed}ms) - {type(e).__name__}: {e}")
+        raise
+
+
 def _mutation(name: str, args: dict):
     """Call a Convex mutation by function name."""
     logger = get_logger()
@@ -79,8 +100,12 @@ def save_identifiers(paper_id: str, identifiers: list[dict]):
     })
 
 
-def save_summary(paper_id: str, summary: dict):
-    """Call summaries:createSummary."""
+def save_summary(paper_id: str, summary: dict, language: str = "en"):
+    """Call summaries:createSummary.
+
+    Stores the language used during generation so the /cite endpoint can
+    produce excerpts in the same language as the document's summary.
+    """
     return _mutation("summaries:createSummary", {
         "paperId": paper_id,
         "researchQuestion": summary["researchQuestion"],
@@ -88,7 +113,21 @@ def save_summary(paper_id: str, summary: dict):
         "keyFindings": summary["keyFindings"],
         "keywords": summary["keywords"],
         "rawSummary": summary["rawSummary"],
+        "language": language,
     })
+
+
+def get_summary_language(paper_id: str) -> str | None:
+    """Return the stored language code for this paper's summary, or None.
+
+    Used by the /cite endpoint to produce excerpts in the document's own
+    language rather than falling back to a global setting.
+    """
+    result = _query("summaries:getSummaryByPaper", {"paperId": paper_id})
+    summary = result.get("value")
+    if summary:
+        return summary.get("language")
+    return None
 
 
 def save_citation_matches(paper_id: str, scored_sections: list[dict]):

@@ -274,6 +274,7 @@ export default function Dashboard() {
         <DocumentPreviewModal
           paper={previewPaper}
           onClose={() => setPreviewPaper(null)}
+          onCite={triggerCitation}
         />
       )}
     </div>
