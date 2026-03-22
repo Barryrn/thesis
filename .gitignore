@@ -27,3 +27,5 @@ convex/convex/_generated/
 
 # Claude
 .claude/
+video/out/
+video/public/
