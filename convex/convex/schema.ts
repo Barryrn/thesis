@@ -17,6 +17,7 @@ export default defineSchema({
     errorMessage: v.optional(v.string()),
     uploadedAt: v.number(),
     notes: v.optional(v.string()),
+    fileName: v.optional(v.string()),
     libraryDisplayOrder: v.optional(v.number()),
   }),
 
@@ -69,7 +70,25 @@ export default defineSchema({
     relevanceNote: v.string(),
     orderIndex: v.number(),
     isManual: v.optional(v.boolean()),
+    pageNumber: v.optional(v.string()),
   })
     .index("by_match", ["matchId"])
     .index("by_paper_section", ["paperId", "sectionId"]),
+
+  /// Freeform user-defined collections that papers can be tagged into.
+  paperGroups: defineTable({
+    name: v.string(),
+    color: v.string(),
+    createdAt: v.number(),
+  }),
+
+  /// Many-to-many join between papers and paperGroups.
+  paperGroupMemberships: defineTable({
+    paperId: v.id("papers"),
+    groupId: v.id("paperGroups"),
+    addedAt: v.number(),
+  })
+    .index("by_paper", ["paperId"])
+    .index("by_group", ["groupId"])
+    .index("by_paper_group", ["paperId", "groupId"]),
 });

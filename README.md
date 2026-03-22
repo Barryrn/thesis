@@ -257,4 +257,4 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## License
 
-This project is licensed under the Apache License 2.0 — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License with the Commons Clause — see the [LICENSE](LICENSE) file for details.

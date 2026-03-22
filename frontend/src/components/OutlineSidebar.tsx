@@ -5,17 +5,20 @@ import { useDroppable } from "@dnd-kit/core";
 import { api } from "../../convex/_generated/api";
 import { buildSectionTree } from "@/lib/treeBuilder";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, StickyNote } from "lucide-react";
-import type { ActiveSection, SectionTreeNode } from "@/lib/types";
+import { Loader2, Pencil, StickyNote } from "lucide-react";
+import type { ActiveSection, SectionId, SectionTreeNode } from "@/lib/types";
 
 interface OutlineSidebarProps {
   activeSection: ActiveSection | null;
   onSelectSection: (section: ActiveSection | null) => void;
+  /// Set of section IDs currently being cited via the /cite endpoint.
+  citingSections: Set<SectionId>;
 }
 
 export default function OutlineSidebar({
   activeSection,
   onSelectSection,
+  citingSections,
 }: OutlineSidebarProps) {
   const sections = useQuery(api.outline.listSections) ?? [];
   const tree = useMemo(() => buildSectionTree(sections), [sections]);
@@ -52,6 +55,7 @@ export default function OutlineSidebar({
                 depth={0}
                 activeSection={activeSection}
                 onSelectSection={onSelectSection}
+                citingSections={citingSections}
               />
             ))}
           </div>
@@ -66,6 +70,7 @@ interface SidebarSectionNodeProps {
   depth: number;
   activeSection: ActiveSection | null;
   onSelectSection: (section: ActiveSection | null) => void;
+  citingSections: Set<SectionId>;
 }
 
 function SidebarSectionNode({
@@ -73,6 +78,7 @@ function SidebarSectionNode({
   depth,
   activeSection,
   onSelectSection,
+  citingSections,
 }: SidebarSectionNodeProps) {
   const matches = useQuery(api.matches.getMatchesBySection, {
     sectionId: node._id,
@@ -80,8 +86,12 @@ function SidebarSectionNode({
 
   const { setNodeRef, isOver } = useDroppable({
     id: `section-${node._id}`,
-    data: { sectionId: node._id },
+    // type: "outline-section" tells Dashboard to trigger GPT citation on drop
+    // rather than doing a plain manual addMatch.
+    data: { type: "outline-section", sectionId: node._id },
   });
+
+  const isCiting = citingSections.has(node._id);
 
   const paperCount = matches?.length ?? 0;
   const isActive = activeSection?.sectionId === node._id;
@@ -117,23 +127,28 @@ function SidebarSectionNode({
         <span className="truncate flex-1 text-[13px] leading-snug">
           {node.title}
         </span>
-        {node.notes && (
+        {node.notes && !isCiting && (
           <StickyNote
             className="size-3 text-amber-dim/50 shrink-0"
             title={node.notes}
           />
         )}
-        {paperCount > 0 && (
-          <Badge
-            variant="secondary"
-            className={`text-[10px] h-4 px-1.5 shrink-0 ${
-              isActive
-                ? "bg-amber/20 text-amber"
-                : "bg-sidebar-accent text-muted-foreground"
-            }`}
-          >
-            {paperCount}
-          </Badge>
+        {/* Spinner shown while /cite is running for this section */}
+        {isCiting ? (
+          <Loader2 className="size-3 text-amber animate-spin shrink-0" title="Extracting citations…" />
+        ) : (
+          paperCount > 0 && (
+            <Badge
+              variant="secondary"
+              className={`text-[10px] h-4 px-1.5 shrink-0 ${
+                isActive
+                  ? "bg-amber/20 text-amber"
+                  : "bg-sidebar-accent text-muted-foreground"
+              }`}
+            >
+              {paperCount}
+            </Badge>
+          )
         )}
       </button>
 
@@ -146,6 +161,7 @@ function SidebarSectionNode({
               depth={depth + 1}
               activeSection={activeSection}
               onSelectSection={onSelectSection}
+              citingSections={citingSections}
             />
           ))}
         </div>

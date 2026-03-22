@@ -10,6 +10,8 @@ export const createPaper = mutation({
     year: v.optional(v.number()),
     storageId: v.string(),
     fileUrl: v.string(),
+    /// Original filename (e.g. "paper.pdf") used to determine file type in the UI.
+    fileName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const paperId = await ctx.db.insert("papers", {
@@ -18,6 +20,7 @@ export const createPaper = mutation({
       year: args.year,
       storageId: args.storageId,
       fileUrl: args.fileUrl,
+      fileName: args.fileName,
       status: "pending",
       uploadedAt: Date.now(),
     });
@@ -142,6 +145,48 @@ export const deletePaper = mutation({
 
     // 6. Delete the paper record
     await ctx.db.delete(args.paperId);
+  },
+});
+
+/// Deletes every paper and all associated data (excerpts, matches, summaries,
+/// identifiers, and stored files) in a single mutation.
+export const deleteAllPapers = mutation({
+  args: {},
+  handler: async (ctx) => {
+    // 1. Delete all matchExcerpts
+    const excerpts = await ctx.db.query("matchExcerpts").collect();
+    for (const excerpt of excerpts) {
+      await ctx.db.delete(excerpt._id);
+    }
+
+    // 2. Delete all paperSectionMatches
+    const matches = await ctx.db.query("paperSectionMatches").collect();
+    for (const match of matches) {
+      await ctx.db.delete(match._id);
+    }
+
+    // 3. Delete all summaries
+    const summaries = await ctx.db.query("summaries").collect();
+    for (const summary of summaries) {
+      await ctx.db.delete(summary._id);
+    }
+
+    // 4. Delete all paperIdentifiers
+    const identifiers = await ctx.db.query("paperIdentifiers").collect();
+    for (const identifier of identifiers) {
+      await ctx.db.delete(identifier._id);
+    }
+
+    // 5. Delete stored PDF files and paper records
+    const papers = await ctx.db.query("papers").collect();
+    for (const paper of papers) {
+      if (paper.storageId) {
+        await ctx.storage.delete(paper.storageId);
+      }
+      await ctx.db.delete(paper._id);
+    }
+
+    return { deleted: papers.length };
   },
 });
 

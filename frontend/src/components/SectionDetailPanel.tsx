@@ -101,7 +101,9 @@ function SectionContent({
 
   const { setNodeRef, isOver } = useDroppable({
     id: `section-detail-${activeSection.sectionId}`,
-    data: { sectionId: activeSection.sectionId },
+    // type: "section-detail" distinguishes this drop zone from sidebar nodes,
+    // which use type: "outline-section" and trigger GPT citation instead.
+    data: { type: "section-detail", sectionId: activeSection.sectionId },
   });
 
   return (

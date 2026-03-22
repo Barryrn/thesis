@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as groups from "../groups.js";
 import type * as http from "../http.js";
 import type * as matches from "../matches.js";
 import type * as outline from "../outline.js";
@@ -21,6 +22,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  groups: typeof groups;
   http: typeof http;
   matches: typeof matches;
   outline: typeof outline;

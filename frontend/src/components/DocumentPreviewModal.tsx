@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import PdfViewer from "@/components/PdfViewer";
 import { useQuery, useMutation } from "convex/react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,10 @@ export default function DocumentPreviewModal({
   const [showAddSection, setShowAddSection] = useState(false);
   const [sectionSearch, setSectionSearch] = useState("");
   const [assignmentSort, setAssignmentSort] = useState<"score" | "order">("score");
+
+  // Determines whether the PDF tab should be shown — only for .pdf uploads.
+  const isPdf = paper.fileName?.toLowerCase().endsWith(".pdf") ?? false;
+  const [activeTab, setActiveTab] = useState<"summary" | "pdf">("summary");
 
   const assignedSectionIds = useMemo(
     () => new Set(assignments?.map((a) => a.sectionId) ?? []),
@@ -193,6 +198,33 @@ export default function DocumentPreviewModal({
             </div>
           )}
 
+          {/* ─── Tabs (only shown when a PDF is available) ─── */}
+          {isPdf && (
+            <div className="flex items-center gap-1 border-b border-border/30 pb-0">
+              {(["summary", "pdf"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-3 py-1.5 text-xs font-medium capitalize rounded-t-md transition-colors border-b-2 -mb-px ${
+                    activeTab === tab
+                      ? "border-amber text-amber"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ─── PDF tab content ─── */}
+          {activeTab === "pdf" && isPdf && (
+            <PdfViewer fileUrl={paper.fileUrl} />
+          )}
+
+          {/* ─── Summary tab content ─── */}
+          {activeTab === "summary" && (
+            <>
           {/* ─── Document Notes ─── */}
           <DocumentNotesBlock paper={paper} />
 
@@ -451,6 +483,8 @@ export default function DocumentPreviewModal({
               </div>
             )}
           </div>
+            </>
+          )}
         </div>
       </SheetContent>
     </Sheet>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation } from "convex/react";
 import {
@@ -20,11 +20,12 @@ import OutlineSidebar from "@/components/OutlineSidebar";
 import SectionDetailPanel from "@/components/SectionDetailPanel";
 import DocumentLibrary from "@/components/DocumentLibrary";
 import DocumentPreviewModal from "@/components/DocumentPreviewModal";
-import type { ActiveSection, DragData, SectionId, Paper } from "@/lib/types";
+import type { ActiveSection, DragData, PaperId, SectionId, Paper } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
 
 export default function Dashboard() {
   const papers = useQuery(api.papers.listPapers) ?? [];
+  const sections = useQuery(api.outline.listSections) ?? [];
   const addMatch = useMutation(api.matches.addMatch);
   const updateMatch = useMutation(api.matches.updateMatch);
   const reorderMatches = useMutation(api.matches.reorderMatches);
@@ -40,6 +41,10 @@ export default function Dashboard() {
   const [libraryPaperOrder, setLibraryPaperOrder] = useState<
     Id<"papers">[]
   >([]);
+  // Tracks which section IDs are awaiting a /cite response (shows spinner)
+  const [citingSections, setCitingSections] = useState<Set<SectionId>>(
+    new Set()
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -58,6 +63,50 @@ export default function Dashboard() {
     setActiveDrag(event.active.data.current as DragData);
     setPreviewPaper(null);
   }
+
+  /**
+   * Calls the /cite backend endpoint to run GPT-based scoring and excerpt
+   * extraction for a specific paper against one or more outline sections.
+   * Shows a spinner on the target section nodes during processing.
+   */
+  const triggerCitation = useCallback(
+    async (paperId: PaperId, sectionIds: SectionId[]) => {
+      const paper = papers.find((p) => p._id === paperId);
+      if (!paper?.fileUrl) return;
+
+      // Show spinner on each target section
+      setCitingSections((prev) => new Set([...prev, ...sectionIds]));
+
+      try {
+        await fetch("http://localhost:8000/cite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paperId,
+            fileUrl: paper.fileUrl,
+            sectionIds,
+            // Pass full section objects so the backend can filter and score
+            sections: sections.map((s) => ({
+              _id: s._id,
+              title: s.title,
+              orderNumber: s.orderNumber,
+              notes: s.notes,
+            })),
+            language: "en",
+          }),
+        });
+      } catch (err) {
+        console.error("[CITE] Citation request failed:", err);
+      } finally {
+        setCitingSections((prev) => {
+          const next = new Set(prev);
+          sectionIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+    },
+    [papers, sections]
+  );
 
   async function handleDragEnd(event: DragEndEvent) {
     setActiveDrag(null);
@@ -99,6 +148,7 @@ export default function Dashboard() {
       }
     }
 
+    const dropType = over.data.current?.type as string | undefined;
     const targetSectionId = over.data.current?.sectionId as
       | SectionId
       | undefined;
@@ -106,18 +156,34 @@ export default function Dashboard() {
 
     const { paperId, sourceSectionId } = dragData;
 
-    if (sourceSectionId === null) {
-      await addMatch({
-        paperId,
-        sectionId: targetSectionId,
-        relevanceScore: 1.0,
-      });
-    } else if (sourceSectionId !== targetSectionId) {
-      await updateMatch({
-        paperId,
-        oldSectionId: sourceSectionId,
-        newSectionId: targetSectionId,
-      });
+    if (dropType === "outline-section") {
+      // Sidebar section drop → trigger GPT citation for this section
+      // (only when dragging from the library; moves from sections stay as manual)
+      if (sourceSectionId === null) {
+        await triggerCitation(paperId, [targetSectionId]);
+      } else if (sourceSectionId !== targetSectionId) {
+        // Move between sections without re-running citation
+        await updateMatch({
+          paperId,
+          oldSectionId: sourceSectionId,
+          newSectionId: targetSectionId,
+        });
+      }
+    } else {
+      // Center-panel drop → manual add (no GPT, immediate)
+      if (sourceSectionId === null) {
+        await addMatch({
+          paperId,
+          sectionId: targetSectionId,
+          relevanceScore: 1.0,
+        });
+      } else if (sourceSectionId !== targetSectionId) {
+        await updateMatch({
+          paperId,
+          oldSectionId: sourceSectionId,
+          newSectionId: targetSectionId,
+        });
+      }
     }
   }
 
@@ -161,6 +227,7 @@ export default function Dashboard() {
             <OutlineSidebar
               activeSection={activeSection}
               onSelectSection={setActiveSection}
+              citingSections={citingSections}
             />
           </aside>
 

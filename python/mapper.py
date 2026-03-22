@@ -1,7 +1,10 @@
 import json
 import os
+import time
 from openai import OpenAI
 from dotenv import load_dotenv
+
+from pipeline_logger import get_logger, log_openai_call, log_openai_response
 
 load_dotenv()
 
@@ -27,6 +30,8 @@ For each section:
 
 Some sections may include guidance notes (shown after the title in parentheses). These notes describe what content belongs in that section or which aspects are particularly important. Use these notes to improve your scoring accuracy — they represent the author's intent for what each section should contain.
 
+The paper text contains markers like "--- PAGE N ---" that indicate page boundaries. For each excerpt, identify the page it appears on and include it as "pageNumber" (e.g. "42"). If you cannot determine the page, omit "pageNumber".
+
 Return a JSON array only. No markdown, no explanation.
 Format:
 [
@@ -36,7 +41,8 @@ Format:
     "excerpts": [
       {{
         "text": "<verbatim quote from paper>",
-        "relevanceNote": "<1-sentence explanation{' in ' + lang_name if language != 'en' else ''}>"
+        "relevanceNote": "<1-sentence explanation{' in ' + lang_name if language != 'en' else ''}>",
+        "pageNumber": "<page number as a string, e.g. \\"42\\">"
       }}
     ]
   }}
@@ -48,7 +54,8 @@ Rules:
 - Sections with score < 0.4 should have an empty excerpts array.
 - Excerpts MUST be exact quotes from the paper text provided. Do not paraphrase.
 - Maximum 3 excerpts per section.
-- Each excerpt text should be 1-3 complete sentences."""
+- Each excerpt text should be 1-3 complete sentences.
+- Do NOT include "--- PAGE N ---" markers in the excerpt text itself."""
 
 
 def score_sections(
@@ -79,15 +86,27 @@ def score_sections(
         user_message += f"\n\nPaper full text (for excerpt extraction):\n{truncated}"
 
     system_prompt = _build_score_prompt(language)
+    logger = get_logger()
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=8192,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-    )
+    log_openai_call(MODEL, 8192, len(user_message))
+    logger.info(f"Scoring {len(sections)} sections against paper", extra={"step": "score_sections"})
+
+    t0 = time.monotonic()
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            max_tokens=8192,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        log_openai_response(MODEL, elapsed, success=True)
+    except Exception as e:
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        log_openai_response(MODEL, elapsed, success=False, error=str(e))
+        raise
 
     raw = response.choices[0].message.content.strip()
     # Strip markdown fences GPT sometimes adds
@@ -119,10 +138,16 @@ def score_sections(
         validated_excerpts = []
         for exc in item["excerpts"]:
             if isinstance(exc, dict) and "text" in exc and "relevanceNote" in exc:
-                validated_excerpts.append(exc)
+                validated_excerpts.append({
+                    "text": exc["text"],
+                    "relevanceNote": exc["relevanceNote"],
+                    "pageNumber": exc.get("pageNumber"),
+                })
         item["excerpts"] = validated_excerpts
 
     # Filter out entries with unresolvable sectionIds
     scores = [s for s in scores if s["sectionId"] in valid_ids]
+
+    logger.debug(f"Mapper returned {len(scores)} scored sections", extra={"step": "score_sections"})
 
     return scores

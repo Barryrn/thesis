@@ -236,6 +236,7 @@ export default function UploadZone() {
         authors: [],
         storageId,
         fileUrl,
+        fileName: file.name,
       });
       addLog("ok", `[${file.name}] Step 4/5: Paper created (id: ${paperId})`);
 

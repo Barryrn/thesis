@@ -1,3 +1,5 @@
+/// Document library panel (right sidebar). Shows all papers with search,
+/// status filters, group filters, and optional manual sort via drag-and-drop.
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import {
@@ -7,6 +9,7 @@ import {
 import { api } from "../../convex/_generated/api";
 import { Search, ArrowDownWideNarrow, RotateCcw } from "lucide-react";
 import LibraryPaperCard from "./LibraryPaperCard";
+import GroupsSection from "./GroupsSection";
 
 type StatusFilter = "all" | "unassigned" | "processing" | "completed";
 type SortMode = "alphabetical" | "manual";
@@ -18,7 +21,7 @@ const filterTabs: { key: StatusFilter; label: string }[] = [
   { key: "completed", label: "Done" },
 ];
 
-import type { Paper, PaperId } from "@/lib/types";
+import type { Paper, PaperId, PaperGroup, GroupId } from "@/lib/types";
 
 interface DocumentLibraryProps {
   onPreviewPaper: (paper: Paper) => void;
@@ -31,22 +34,48 @@ export default function DocumentLibrary({
 }: DocumentLibraryProps) {
   const papers = useQuery(api.papers.listPapers) ?? [];
   const unassigned = useQuery(api.matches.getUnassignedPapers) ?? [];
+  const groups = (useQuery(api.groups.listGroups) ?? []) as PaperGroup[];
+  const memberships = useQuery(api.groups.listAllMemberships) ?? [];
   const resetLibraryOrder = useMutation(api.papers.resetLibraryOrder);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("alphabetical");
+  const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(null);
 
   const unassignedIds = useMemo(
     () => new Set(unassigned.map((p) => p._id)),
     [unassigned]
   );
 
-  const isFiltered = searchQuery.trim() !== "" || statusFilter !== "all";
+  /// paperId → Set<groupId> — built once from the flat memberships list.
+  const membershipsByPaper = useMemo(() => {
+    const map = new Map<PaperId, Set<GroupId>>();
+    for (const m of memberships) {
+      if (!map.has(m.paperId)) map.set(m.paperId, new Set());
+      map.get(m.paperId)!.add(m.groupId);
+    }
+    return map;
+  }, [memberships]);
+
+  /// groupId → paper count.
+  const membershipsByGroup = useMemo(() => {
+    const map = new Map<GroupId, number>();
+    for (const m of memberships) {
+      map.set(m.groupId, (map.get(m.groupId) ?? 0) + 1);
+    }
+    return map;
+  }, [memberships]);
+
+  const isFiltered =
+    searchQuery.trim() !== "" ||
+    statusFilter !== "all" ||
+    selectedGroupId !== null;
 
   const filteredPapers = useMemo(() => {
     let result = papers;
 
-    // Search filter
+    // Search filter.
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -56,7 +85,7 @@ export default function DocumentLibrary({
       );
     }
 
-    // Status filter
+    // Status filter.
     switch (statusFilter) {
       case "unassigned":
         result = result.filter((p) => unassignedIds.has(p._id));
@@ -71,7 +100,14 @@ export default function DocumentLibrary({
         break;
     }
 
-    // Sort
+    // Group filter (AND-combined with status filter above).
+    if (selectedGroupId !== null) {
+      result = result.filter((p) =>
+        membershipsByPaper.get(p._id)?.has(selectedGroupId)
+      );
+    }
+
+    // Sort.
     const sorted = [...result];
     if (sortMode === "manual" && !isFiltered) {
       sorted.sort((a, b) => {
@@ -85,13 +121,13 @@ export default function DocumentLibrary({
     }
 
     return sorted;
-  }, [papers, searchQuery, statusFilter, unassignedIds, sortMode, isFiltered]);
+  }, [papers, searchQuery, statusFilter, unassignedIds, sortMode, isFiltered, selectedGroupId, membershipsByPaper]);
 
   const hasManualOrder = papers.some(
     (p) => p.libraryDisplayOrder !== undefined
   );
 
-  // Report current order to parent for drag detection
+  // Report current order to parent for drag detection.
   useEffect(() => {
     if (sortMode === "manual" && !isFiltered) {
       onLibraryOrderChange?.(filteredPapers.map((p) => p._id));
@@ -123,6 +159,16 @@ export default function DocumentLibrary({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full h-8 pl-8 pr-3 text-sm bg-muted/30 border border-border/50 rounded-md text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-amber/40 focus:border-amber/30 transition-all"
+          />
+        </div>
+
+        {/* Groups — collapsible section above filter tabs */}
+        <div className="mt-3">
+          <GroupsSection
+            groups={groups}
+            membershipsByGroup={membershipsByGroup}
+            selectedGroupId={selectedGroupId}
+            onSelectGroup={setSelectedGroupId}
           />
         </div>
 
@@ -207,6 +253,8 @@ export default function DocumentLibrary({
                 isUnassigned={unassignedIds.has(paper._id)}
                 onPreview={onPreviewPaper}
                 sortable
+                groups={groups}
+                paperGroupIds={membershipsByPaper.get(paper._id) ?? new Set()}
               />
             ))}
           </SortableContext>
@@ -217,6 +265,8 @@ export default function DocumentLibrary({
               paper={paper}
               isUnassigned={unassignedIds.has(paper._id)}
               onPreview={onPreviewPaper}
+              groups={groups}
+              paperGroupIds={membershipsByPaper.get(paper._id) ?? new Set()}
             />
           ))
         )}

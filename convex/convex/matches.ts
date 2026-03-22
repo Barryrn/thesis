@@ -32,6 +32,106 @@ async function deleteExcerptsForPaper(
 
 // ===== MUTATIONS =====
 
+/// Upserts citation matches for specific sections only, preserving
+/// matches for all other sections. Called by the /cite endpoint after
+/// the user drags a paper onto a sidebar section node.
+export const upsertCitationMatches = mutation({
+  args: {
+    paperId: v.id("papers"),
+    matches: v.array(
+      v.object({
+        sectionId: v.id("outlineSections"),
+        relevanceScore: v.number(),
+      })
+    ),
+    excerpts: v.array(
+      v.object({
+        sectionId: v.id("outlineSections"),
+        excerptText: v.string(),
+        relevanceNote: v.string(),
+        orderIndex: v.number(),
+        pageNumber: v.optional(v.string()),
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    // Load all existing matches for this paper once (already has pageNumber)
+    const existingMatches = await ctx.db
+      .query("paperSectionMatches")
+      .withIndex("by_paper", (q) => q.eq("paperId", args.paperId))
+      .collect();
+
+    const matchIds: Record<string, any> = {};
+    const now = Date.now();
+
+    for (const match of args.matches) {
+      // Remove existing excerpts for this paper+section before reinserting
+      const oldExcerpts = await ctx.db
+        .query("matchExcerpts")
+        .withIndex("by_paper_section", (q) =>
+          q.eq("paperId", args.paperId).eq("sectionId", match.sectionId)
+        )
+        .collect();
+      for (const e of oldExcerpts) await ctx.db.delete(e._id);
+
+      // Upsert the match record
+      const existing = existingMatches.find(
+        (m) => m.sectionId === match.sectionId
+      );
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          relevanceScore: match.relevanceScore,
+          isManualOverride: false,
+          matchedAt: now,
+        });
+        matchIds[match.sectionId as string] = existing._id;
+      } else {
+        const id = await ctx.db.insert("paperSectionMatches", {
+          paperId: args.paperId,
+          sectionId: match.sectionId,
+          relevanceScore: match.relevanceScore,
+          isManualOverride: false,
+          matchedAt: now,
+        });
+        matchIds[match.sectionId as string] = id;
+      }
+    }
+
+    // Insert excerpts linked to their respective match IDs
+    for (const excerpt of args.excerpts) {
+      const matchId = matchIds[excerpt.sectionId as string];
+      if (matchId) {
+        await ctx.db.insert("matchExcerpts", {
+          matchId,
+          paperId: args.paperId,
+          sectionId: excerpt.sectionId,
+          excerptText: excerpt.excerptText,
+          relevanceNote: excerpt.relevanceNote,
+          orderIndex: excerpt.orderIndex,
+          isManual: false,
+          pageNumber: excerpt.pageNumber ?? undefined,
+        });
+      }
+    }
+
+    return Object.values(matchIds);
+  },
+});
+
+/// Deletes all paper-section matches and their linked excerpts across the
+/// entire database. Used for one-time migration to the on-demand citation
+/// workflow.
+export const clearAllMatches = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const matches = await ctx.db.query("paperSectionMatches").collect();
+    for (const match of matches) {
+      await deleteExcerptsForMatch(ctx, match._id);
+      await ctx.db.delete(match._id);
+    }
+  },
+});
+
 export const createMatches = mutation({
   args: {
     paperId: v.id("papers"),
@@ -83,6 +183,7 @@ export const createExcerpts = mutation({
         excerptText: v.string(),
         relevanceNote: v.string(),
         orderIndex: v.number(),
+        pageNumber: v.optional(v.string()),
       })
     ),
   },
@@ -97,6 +198,7 @@ export const createExcerpts = mutation({
         relevanceNote: excerpt.relevanceNote,
         orderIndex: excerpt.orderIndex,
         isManual: false,
+        pageNumber: excerpt.pageNumber,
       });
       ids.push(id);
     }
@@ -196,6 +298,7 @@ export const addExcerpt = mutation({
     sectionId: v.id("outlineSections"),
     excerptText: v.string(),
     relevanceNote: v.string(),
+    pageNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -215,6 +318,7 @@ export const addExcerpt = mutation({
       relevanceNote: args.relevanceNote,
       orderIndex: maxOrder + 1,
       isManual: true,
+      pageNumber: args.pageNumber,
     });
   },
 });
@@ -224,12 +328,13 @@ export const updateExcerpt = mutation({
     excerptId: v.id("matchExcerpts"),
     excerptText: v.optional(v.string()),
     relevanceNote: v.optional(v.string()),
+    pageNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const patch: Record<string, string> = {};
+    const patch: Record<string, string | undefined> = {};
     if (args.excerptText !== undefined) patch.excerptText = args.excerptText;
-    if (args.relevanceNote !== undefined)
-      patch.relevanceNote = args.relevanceNote;
+    if (args.relevanceNote !== undefined) patch.relevanceNote = args.relevanceNote;
+    if (args.pageNumber !== undefined) patch.pageNumber = args.pageNumber || undefined;
     await ctx.db.patch(args.excerptId, patch);
   },
 });

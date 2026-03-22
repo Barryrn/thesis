@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 
+from pipeline_logger import get_logger
+
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 MAX_TEXT_LENGTH = 80_000
@@ -11,7 +13,11 @@ METADATA_LENGTH = 2_000
 
 def extract(file_path: str) -> dict:
     """Extract text and metadata from a PDF, DOCX, or TXT file."""
+    logger = get_logger()
     file_size = os.path.getsize(file_path)
+    logger.info(f"Extracting from {os.path.splitext(file_path)[1].lower()} file ({file_size} bytes)",
+                extra={"step": "extract", "file_type": os.path.splitext(file_path)[1].lower(), "file_size": file_size})
+
     if file_size > MAX_FILE_SIZE:
         raise ValueError(f"File exceeds 50MB limit ({file_size} bytes)")
 
@@ -39,7 +45,11 @@ def extract(file_path: str) -> dict:
 
 
 def _extract_pdf(file_path: str) -> str:
-    """Extract text from PDF using pdfplumber, falling back to PyMuPDF."""
+    """Extract text from PDF using pdfplumber, falling back to PyMuPDF.
+
+    Embeds '--- PAGE N ---' markers between pages so the mapping step
+    can detect on which page each excerpt appears.
+    """
     import pdfplumber
 
     text = ""
@@ -48,17 +58,22 @@ def _extract_pdf(file_path: str) -> str:
             page_text = page.extract_text()
             if page_text is None:
                 continue
-            text += page_text + "\n"
+            # page.page_number is 1-based in pdfplumber
+            text += f"\n--- PAGE {page.page_number} ---\n{page_text}\n"
             if len(text) >= MAX_TEXT_LENGTH:
                 break
 
     if len(text.strip()) < 200:
+        logger = get_logger()
+        logger.info(f"pdfplumber extracted only {len(text.strip())} chars, falling back to PyMuPDF",
+                     extra={"step": "extract_fallback"})
         import fitz
 
         text = ""
         doc = fitz.open(file_path)
         for page in doc:
-            text += page.get_text() + "\n"
+            # page.number is 0-based in PyMuPDF; add 1 for human-readable page numbers
+            text += f"\n--- PAGE {page.number + 1} ---\n{page.get_text()}\n"
             if len(text) >= MAX_TEXT_LENGTH:
                 break
         doc.close()

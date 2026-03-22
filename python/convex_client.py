@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import time
 import httpx
 from dotenv import load_dotenv
+
+from pipeline_logger import get_logger
 
 load_dotenv()
 
@@ -16,14 +19,28 @@ HEADERS = {
 
 def _mutation(name: str, args: dict):
     """Call a Convex mutation by function name."""
-    res = httpx.post(
-        f"{CONVEX_URL}/api/mutation",
-        headers=HEADERS,
-        json={"path": name, "args": args},
-        timeout=30,
-    )
-    res.raise_for_status()
-    return res.json()
+    logger = get_logger()
+    logger.debug(f"Convex mutation started: {name}", extra={"step": "convex_mutation", "mutation": name, "status": "started"})
+
+    t0 = time.monotonic()
+    try:
+        res = httpx.post(
+            f"{CONVEX_URL}/api/mutation",
+            headers=HEADERS,
+            json={"path": name, "args": args},
+            timeout=30,
+        )
+        res.raise_for_status()
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        logger.debug(f"Convex mutation completed: {name} ({elapsed}ms)",
+                      extra={"step": "convex_mutation", "mutation": name, "status": "completed", "elapsed_ms": elapsed})
+        return res.json()
+    except Exception as e:
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        logger.error(f"Convex mutation failed: {name} ({elapsed}ms) - {type(e).__name__}: {e}",
+                      extra={"step": "convex_mutation", "mutation": name, "status": "failed",
+                             "elapsed_ms": elapsed, "error_type": type(e).__name__, "error_message": str(e)})
+        raise
 
 
 def update_status(paper_id: str, status: str, error: str | None = None):
@@ -74,6 +91,44 @@ def save_summary(paper_id: str, summary: dict):
     })
 
 
+def save_citation_matches(paper_id: str, scored_sections: list[dict]):
+    """Upsert citation matches for specific sections only.
+
+    Unlike save_matches_with_excerpts, this preserves existing matches
+    for other sections — only the scored sections are overwritten.
+    Called by the /cite endpoint for on-demand per-section citation.
+    """
+    filtered = [s for s in scored_sections if s["score"] > 0.0]
+    if not filtered:
+        return None
+
+    all_excerpts = []
+    matches_payload = [
+        {"sectionId": s["sectionId"], "relevanceScore": s["score"]}
+        for s in filtered
+    ]
+
+    # Collect excerpts (sectionId replaces matchId — resolved server-side)
+    for section in filtered:
+        if section.get("excerpts"):
+            for order_idx, exc in enumerate(section["excerpts"]):
+                excerpt_obj: dict = {
+                    "sectionId": section["sectionId"],
+                    "excerptText": exc["text"],
+                    "relevanceNote": exc["relevanceNote"],
+                    "orderIndex": order_idx,
+                }
+                if exc.get("pageNumber"):
+                    excerpt_obj["pageNumber"] = exc["pageNumber"]
+                all_excerpts.append(excerpt_obj)
+
+    return _mutation("matches:upsertCitationMatches", {
+        "paperId": paper_id,
+        "matches": matches_payload,
+        "excerpts": all_excerpts,
+    })
+
+
 def save_matches_with_excerpts(paper_id: str, scored_sections: list[dict]):
     """Save matches and their supporting excerpts to Convex.
 
@@ -101,13 +156,16 @@ def save_matches_with_excerpts(paper_id: str, scored_sections: list[dict]):
     for i, section in enumerate(filtered):
         if i < len(match_ids) and section.get("excerpts"):
             for order_idx, exc in enumerate(section["excerpts"]):
-                all_excerpts.append({
+                excerpt_obj: dict = {
                     "matchId": match_ids[i],
                     "sectionId": section["sectionId"],
                     "excerptText": exc["text"],
                     "relevanceNote": exc["relevanceNote"],
                     "orderIndex": order_idx,
-                })
+                }
+                if exc.get("pageNumber"):
+                    excerpt_obj["pageNumber"] = exc["pageNumber"]
+                all_excerpts.append(excerpt_obj)
 
     # Step 3: Save excerpts in batch
     if all_excerpts:

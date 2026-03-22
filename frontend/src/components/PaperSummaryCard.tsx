@@ -6,6 +6,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   GripVertical,
@@ -106,18 +107,21 @@ function ExcerptItem({
     excerptId: Id<"matchExcerpts">;
     excerptText?: string;
     relevanceNote?: string;
+    pageNumber?: string;
   }) => Promise<void>;
   onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(excerpt.excerptText);
   const [editNote, setEditNote] = useState(excerpt.relevanceNote);
+  const [editPageNumber, setEditPageNumber] = useState(excerpt.pageNumber ?? "");
 
   async function handleSave() {
     await onUpdate({
       excerptId: excerpt._id,
       excerptText: editText,
       relevanceNote: editNote,
+      pageNumber: editPageNumber.trim() || undefined,
     });
     setEditing(false);
   }
@@ -137,6 +141,12 @@ function ExcerptItem({
           className="text-sm min-h-[40px]"
           placeholder="Relevance note (optional)"
         />
+        <Input
+          value={editPageNumber}
+          onChange={(e) => setEditPageNumber(e.target.value)}
+          className="text-sm h-8"
+          placeholder="Page (e.g. 42 or 42–45)"
+        />
         <div className="flex gap-2 justify-end">
           <Button variant="ghost" size="xs" onClick={() => setEditing(false)}>
             <X className="size-3" /> Cancel
@@ -154,6 +164,11 @@ function ExcerptItem({
       <blockquote className="text-sm text-foreground/80 leading-relaxed border-l-2 border-amber/30 pl-3 italic">
         &ldquo;{excerpt.excerptText}&rdquo;
       </blockquote>
+      {excerpt.pageNumber && (
+        <p className="text-[10px] text-muted-foreground/60 pl-3">
+          p. {excerpt.pageNumber}
+        </p>
+      )}
       <div className="flex items-start justify-between">
         <p className="text-[11px] text-muted-foreground pl-3 flex-1">
           {excerpt.relevanceNote}
@@ -207,6 +222,7 @@ export default function PaperSummaryCard({
   const [showAddExcerpt, setShowAddExcerpt] = useState(false);
   const [newExcerptText, setNewExcerptText] = useState("");
   const [newRelevanceNote, setNewRelevanceNote] = useState("");
+  const [newPageNumber, setNewPageNumber] = useState("");
 
   // Additional notes state
   const [notesExpanded, setNotesExpanded] = useState(false);
@@ -278,9 +294,11 @@ export default function PaperSummaryCard({
       sectionId: sectionId,
       excerptText: newExcerptText.trim(),
       relevanceNote: newRelevanceNote.trim(),
+      pageNumber: newPageNumber.trim() || undefined,
     });
     setNewExcerptText("");
     setNewRelevanceNote("");
+    setNewPageNumber("");
     setShowAddExcerpt(false);
   }
 
@@ -485,6 +503,12 @@ export default function PaperSummaryCard({
                           onChange={(e) => setNewRelevanceNote(e.target.value)}
                           className="text-sm min-h-[40px]"
                         />
+                        <Input
+                          placeholder="Page (e.g. 42 or 42–45)"
+                          value={newPageNumber}
+                          onChange={(e) => setNewPageNumber(e.target.value)}
+                          className="text-sm h-8"
+                        />
                         <div className="flex gap-2 justify-end">
                           <Button
                             variant="ghost"
@@ -493,6 +517,7 @@ export default function PaperSummaryCard({
                               setShowAddExcerpt(false);
                               setNewExcerptText("");
                               setNewRelevanceNote("");
+                              setNewPageNumber("");
                             }}
                           >
                             <X className="size-3" /> Cancel

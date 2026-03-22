@@ -1,7 +1,10 @@
 import json
 import os
+import time
 from openai import OpenAI
 from dotenv import load_dotenv
+
+from pipeline_logger import get_logger, log_openai_call, log_openai_response
 
 load_dotenv()
 
@@ -62,19 +65,32 @@ def _strip_fences(text: str) -> str:
 
 def summarize(text: str, language: str = "en") -> dict:
     """Summarize paper text into a structured dict using OpenAI."""
+    logger = get_logger()
+
     if len(text) > CHUNK_SIZE:
+        logger.info(f"Text exceeds chunk threshold ({len(text)} > {CHUNK_SIZE}), using chunked summarization",
+                     extra={"step": "summarize"})
         return summarize_large(text, language=language)
 
     system_prompt = _build_summarize_prompt(language)
+    log_openai_call(MODEL, 2048, len(text))
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=2048,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
-        ],
-    )
+    t0 = time.monotonic()
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            max_tokens=2048,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+        )
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        log_openai_response(MODEL, elapsed, success=True)
+    except Exception as e:
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        log_openai_response(MODEL, elapsed, success=False, error=str(e))
+        raise
 
     raw = _strip_fences(response.choices[0].message.content)
     result = json.loads(raw)
@@ -88,6 +104,7 @@ def summarize(text: str, language: str = "en") -> dict:
 
 def summarize_large(text: str, language: str = "en") -> dict:
     """Handle texts longer than 12,000 chars by chunking."""
+    logger = get_logger()
     chunks = []
     start = 0
     while start < len(text) and len(chunks) < MAX_CHUNKS:
@@ -95,8 +112,18 @@ def summarize_large(text: str, language: str = "en") -> dict:
         chunks.append(text[start:end])
         start = end - CHUNK_OVERLAP
 
-    chunk_summaries = [_summarize_chunk(chunk, language=language) for chunk in chunks]
+    logger.info(f"Splitting into {len(chunks)} chunks (chunk_size={CHUNK_SIZE}, overlap={CHUNK_OVERLAP})",
+                extra={"step": "summarize_chunking", "num_chunks": len(chunks)})
+
+    chunk_summaries = []
+    for i, chunk in enumerate(chunks):
+        logger.debug(f"Summarizing chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)",
+                      extra={"step": "summarize_chunk"})
+        chunk_summaries.append(_summarize_chunk(chunk, language=language))
+
     combined = "\n\n".join(chunk_summaries)
+    logger.info(f"All chunks summarized, combining ({len(combined)} chars) for final summary",
+                extra={"step": "summarize_combine"})
 
     return summarize(combined, language=language)
 
@@ -104,13 +131,23 @@ def summarize_large(text: str, language: str = "en") -> dict:
 def _summarize_chunk(chunk: str, language: str = "en") -> str:
     """Summarize a single chunk of text as plain prose."""
     system_prompt = _build_chunk_prompt(language)
+    log_openai_call(MODEL, 1024, len(chunk))
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=1024,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": chunk},
-        ],
-    )
+    t0 = time.monotonic()
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            max_tokens=1024,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": chunk},
+            ],
+        )
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        log_openai_response(MODEL, elapsed, success=True)
+    except Exception as e:
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        log_openai_response(MODEL, elapsed, success=False, error=str(e))
+        raise
+
     return response.choices[0].message.content
