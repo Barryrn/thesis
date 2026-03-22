@@ -11,16 +11,12 @@ export const createSummary = mutation({
     keyFindings: v.array(v.string()),
     keywords: v.array(v.string()),
     rawSummary: v.string(),
+    /// Language code used when this summary was generated (e.g. "en", "de").
+    /// Stored so the /cite endpoint can produce excerpts in the same language.
+    language: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("summaries", {
-      paperId: args.paperId,
-      researchQuestion: args.researchQuestion,
-      methodology: args.methodology,
-      keyFindings: args.keyFindings,
-      keywords: args.keywords,
-      rawSummary: args.rawSummary,
-    });
+    return await ctx.db.insert("summaries", args);
   },
 });
 

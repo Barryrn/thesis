@@ -39,6 +39,9 @@ export default defineSchema({
     keyFindings: v.array(v.string()),
     keywords: v.array(v.string()),
     rawSummary: v.string(),
+    /// Language code used when this summary was generated (e.g. "en", "de").
+    /// Drives citation language so excerpts match the document's language.
+    language: v.optional(v.string()),
   }).index("by_paper", ["paperId"]),
 
   outlineSections: defineTable({
