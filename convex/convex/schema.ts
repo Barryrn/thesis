@@ -19,6 +19,17 @@ export default defineSchema({
     notes: v.optional(v.string()),
     fileName: v.optional(v.string()),
     libraryDisplayOrder: v.optional(v.number()),
+    /// Current pipeline step shown in the UI during processing.
+    /// Cleared when status transitions to "completed" or "failed".
+    processingStep: v.optional(
+      v.union(
+        v.literal("downloading"),
+        v.literal("extracting"),
+        v.literal("identifying"),
+        v.literal("summarizing"),
+        v.literal("saving")
+      )
+    ),
   }),
 
   paperIdentifiers: defineTable({
@@ -74,9 +85,23 @@ export default defineSchema({
     orderIndex: v.number(),
     isManual: v.optional(v.boolean()),
     pageNumber: v.optional(v.string()),
+    /// True when the page number is a PDF page index rather than a verified
+    /// printed page number. The frontend shows a '~' prefix as a warning.
+    pageNumberApproximate: v.optional(v.boolean()),
   })
     .index("by_match", ["matchId"])
     .index("by_paper_section", ["paperId", "sectionId"]),
+
+  /// Authored thesis prose per section, with inline citation markers.
+  /// Separate from outlineSections so content survives outline re-imports.
+  sectionContent: defineTable({
+    sectionId: v.id("outlineSections"),
+    /// Raw body text containing {{cite:paperId::Label}} markers.
+    body: v.string(),
+    /// Cached array of unique paper IDs referenced in body. Recomputed on save.
+    citedPaperIds: v.array(v.id("papers")),
+    updatedAt: v.number(),
+  }).index("by_section", ["sectionId"]),
 
   /// Freeform user-defined collections that papers can be tagged into.
   paperGroups: defineTable({

@@ -17,7 +17,32 @@ import OutlineEditor from "@/components/OutlineEditor";
 import UploadZone from "@/components/UploadZone";
 import LanguageSelector from "@/components/LanguageSelector";
 
-function StatusBadge({ status }: { status: string }) {
+/// Maps processingStep values to user-friendly labels shown during processing.
+const STEP_LABELS: Record<string, string> = {
+  downloading: "Downloading...",
+  extracting: "Extracting text...",
+  identifying: "Detecting IDs...",
+  summarizing: "Summarizing...",
+  saving: "Saving...",
+};
+
+function StatusBadge({
+  status,
+  processingStep,
+}: {
+  status: string;
+  processingStep?: string;
+}) {
+  // Show the specific pipeline step when processing
+  if (status === "processing" && processingStep) {
+    const stepLabel = STEP_LABELS[processingStep] ?? "Processing...";
+    return (
+      <Badge className="text-xs bg-yellow-500 text-white animate-pulse">
+        {stepLabel}
+      </Badge>
+    );
+  }
+
   const config: Record<string, { className: string; label: string }> = {
     pending: { className: "bg-gray-400 text-white", label: "Pending" },
     processing: {
@@ -98,7 +123,7 @@ export default function Upload() {
                   <TableRow key={p._id}>
                     <TableCell className="font-medium">{p.title}</TableCell>
                     <TableCell>
-                      <StatusBadge status={p.status} />
+                      <StatusBadge status={p.status} processingStep={p.processingStep} />
                     </TableCell>
                     <TableCell>{p.year ?? "\u2014"}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">

@@ -72,6 +72,14 @@ def update_status(paper_id: str, status: str, error: str | None = None):
     return _mutation("papers:updatePaperStatus", args)
 
 
+def update_processing_step(paper_id: str, step: str | None):
+    """Call papers:updateProcessingStep to update the UI progress indicator."""
+    args: dict = {"paperId": paper_id}
+    if step is not None:
+        args["step"] = step
+    return _mutation("papers:updateProcessingStep", args)
+
+
 def update_metadata(paper_id: str, title: str, authors: list[str], year: int | None):
     """Call papers:updatePaperMetadata."""
     args: dict = {
@@ -130,16 +138,25 @@ def get_summary_language(paper_id: str) -> str | None:
     return None
 
 
-def save_citation_matches(paper_id: str, scored_sections: list[dict]):
+def save_citation_matches(
+    paper_id: str,
+    scored_sections: list[dict],
+    page_source: str = "approximate",
+):
     """Upsert citation matches for specific sections only.
 
     Unlike save_matches_with_excerpts, this preserves existing matches
     for other sections — only the scored sections are overwritten.
     Called by the /cite endpoint for on-demand per-section citation.
+
+    When page_source is 'approximate', all excerpts are flagged with
+    pageNumberApproximate=True so the frontend can show a warning.
     """
     filtered = [s for s in scored_sections if s["score"] > 0.0]
     if not filtered:
         return None
+
+    is_approximate = page_source == "approximate"
 
     all_excerpts = []
     matches_payload = [
@@ -159,6 +176,7 @@ def save_citation_matches(paper_id: str, scored_sections: list[dict]):
                 }
                 if exc.get("pageNumber"):
                     excerpt_obj["pageNumber"] = exc["pageNumber"]
+                excerpt_obj["pageNumberApproximate"] = is_approximate
                 all_excerpts.append(excerpt_obj)
 
     return _mutation("matches:upsertCitationMatches", {
@@ -168,15 +186,24 @@ def save_citation_matches(paper_id: str, scored_sections: list[dict]):
     })
 
 
-def save_matches_with_excerpts(paper_id: str, scored_sections: list[dict]):
+def save_matches_with_excerpts(
+    paper_id: str,
+    scored_sections: list[dict],
+    page_source: str = "approximate",
+):
     """Save matches and their supporting excerpts to Convex.
 
     Only saves sections with score > 0.0. After creating matches,
     saves any excerpts linked to the returned match IDs.
+
+    When page_source is 'approximate', all excerpts are flagged with
+    pageNumberApproximate=True so the frontend can show a warning.
     """
     filtered = [s for s in scored_sections if s["score"] > 0.0]
     if not filtered:
         return None
+
+    is_approximate = page_source == "approximate"
 
     # Step 1: Create matches and get back match IDs
     result = _mutation("matches:createMatches", {
@@ -204,6 +231,7 @@ def save_matches_with_excerpts(paper_id: str, scored_sections: list[dict]):
                 }
                 if exc.get("pageNumber"):
                     excerpt_obj["pageNumber"] = exc["pageNumber"]
+                excerpt_obj["pageNumberApproximate"] = is_approximate
                 all_excerpts.append(excerpt_obj)
 
     # Step 3: Save excerpts in batch
