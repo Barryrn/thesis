@@ -212,13 +212,18 @@ export default function SectionWriteEditor({
     }
 
     // Track selection for optimize buttons (only when not in a preview state).
+    // Use functional updaters to avoid re-renders when range hasn't changed.
     if (optimizeState.status === "idle") {
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
       if (start !== end) {
-        setSelection({ start, end });
+        setSelection((prev) =>
+          prev && prev.start === start && prev.end === end
+            ? prev
+            : { start, end }
+        );
       } else {
-        setSelection(null);
+        setSelection((prev) => (prev === null ? prev : null));
       }
     }
   }, [body, pickerOpen, optimizeState.status]);

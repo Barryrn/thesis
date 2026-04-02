@@ -53,7 +53,7 @@ def _build_system_prompt(mode: str, language: str = "en") -> str:
     )
 
     lang_line = ""
-    if language != "en":
+    if language != "en" and language in LANGUAGE_NAMES:
         lang_line = (
             f"\n\nCRITICAL LANGUAGE REQUIREMENT: You MUST write the output in {lang_name}. "
             f"Do NOT write in English."

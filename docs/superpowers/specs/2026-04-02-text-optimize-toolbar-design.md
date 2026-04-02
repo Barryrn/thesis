@@ -32,13 +32,13 @@ The critical invariant: **citations must never be lost or corrupted**.
 
 ```typescript
 replaceCitationsWithPlaceholders(text: string): {
-  cleanText: string;
-  placeholderMap: Map<string, string>; // "[REF1]" → "{{cite:abc::Label}}"
+  cleaned: string;
+  placeholders: Map<string, string>; // "[REF1]" → "{{cite:abc::Label}}"
 }
 
-restoreCitationsFromPlaceholders(
-  optimizedText: string,
-  placeholderMap: Map<string, string>
+restorePlaceholders(
+  text: string,
+  placeholders: Map<string, string>
 ): { restoredText: string; missingRefs: string[] }
 ```
 
@@ -53,17 +53,16 @@ New endpoint on the existing Python FastAPI server (`python/main.py`).
 {
   "text": "selected text with [REF1] placeholders",
   "mode": "enhance",
-  "context": {
-    "before": "sentence before selection for flow context",
-    "after": "sentence after selection for flow context"
-  }
+  "context_before": "sentence before selection for flow context",
+  "context_after": "sentence after selection for flow context",
+  "language": "en"
 }
 ```
 
 **Response:**
 ```json
 {
-  "optimizedText": "improved text with [REF1] preserved"
+  "optimized": "improved text with [REF1] preserved"
 }
 ```
 
