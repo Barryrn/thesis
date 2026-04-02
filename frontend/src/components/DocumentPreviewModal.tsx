@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import PdfViewer from "@/components/PdfViewer";
 import { useQuery, useMutation } from "convex/react";
@@ -86,6 +86,7 @@ export default function DocumentPreviewModal({
   });
   const sections = useQuery(api.outline.listSections);
 
+  const addMatch = useMutation(api.matches.addMatch);
   const removeMatch = useMutation(api.matches.removeMatch);
 
   const [showRawSummary, setShowRawSummary] = useState(false);
@@ -100,6 +101,20 @@ export default function DocumentPreviewModal({
   const [activeTab, setActiveTab] = useState<"summary" | "pdf">("summary");
   // Controls the full-screen PDF overlay rendered via portal.
   const [isPdfFullscreen, setIsPdfFullscreen] = useState(false);
+  const fullscreenRef = useRef<HTMLDivElement>(null);
+
+  // Trap focus and handle Escape key when the full-screen overlay is open.
+  useEffect(() => {
+    if (!isPdfFullscreen) return;
+    // Focus the overlay container so keyboard events are captured.
+    fullscreenRef.current?.focus();
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsPdfFullscreen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isPdfFullscreen]);
 
   const assignedSectionIds = useMemo(
     () => new Set(assignments?.map((a) => a.sectionId) ?? []),
@@ -138,12 +153,23 @@ export default function DocumentPreviewModal({
   const status = statusLabels[paper.status] ?? statusLabels.pending;
 
   /// Assigns this paper to a section and triggers GPT-based citation automatically.
-  /// Shows a spinner on the assigned section row while the /cite request is in flight.
+  /// Creates a placeholder match first so the assignment is visible immediately,
+  /// then runs citation to refine the score and extract excerpts.
   async function handleAddSection(sectionId: SectionId) {
     setCitingSectionIds((prev) => new Set([...prev, sectionId]));
     setShowAddSection(false);
     setSectionSearch("");
     try {
+      // Create a manual match first so the assignment is deterministic — the
+      // /cite pipeline may skip sections with score <= 0, which would silently
+      // discard the user's explicit choice.
+      await addMatch({
+        paperId: paper._id,
+        sectionId,
+        relevanceScore: 1.0,
+      });
+      // Then run GPT citation to refine score & generate excerpts. If GPT
+      // returns a real score the upsert will overwrite the placeholder.
       await onCite(paper._id, [sectionId]);
     } finally {
       setCitingSectionIds((prev) => {
@@ -248,8 +274,8 @@ export default function DocumentPreviewModal({
             </div>
           )}
 
-          {/* ─── PDF tab content ─── */}
-          {activeTab === "pdf" && isPdf && (
+          {/* ─── PDF tab content (hidden when full-screen overlay is active) ─── */}
+          {activeTab === "pdf" && isPdf && !isPdfFullscreen && (
             <PdfViewer fileUrl={paper.fileUrl} />
           )}
 
@@ -525,7 +551,14 @@ export default function DocumentPreviewModal({
 
       {/* ─── Full-screen PDF overlay ─── */}
       {isPdfFullscreen && isPdf && createPortal(
-        <div className="fixed inset-0 z-50 bg-background flex flex-col">
+        <div
+          ref={fullscreenRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Full-screen PDF: ${paper.title}`}
+          tabIndex={-1}
+          className="fixed inset-0 z-50 bg-background flex flex-col outline-none"
+        >
           {/* Toolbar with title and close button */}
           <div className="flex items-center gap-3 px-4 py-2 border-b border-border/30 shrink-0">
             <h2 className="text-sm font-medium text-foreground/80 truncate flex-1">
