@@ -103,4 +103,15 @@ export interface MatchExcerpt {
   orderIndex: number;
   isManual?: boolean;
   pageNumber?: string;
+  /// True when the page number is unverified (PDF page index, not printed page).
+  pageNumberApproximate?: boolean;
 }
+
+/// Maps processingStep values to user-friendly labels shown during paper processing.
+export const PROCESSING_STEP_LABELS: Record<string, string> = {
+  downloading: "Downloading...",
+  extracting: "Extracting text...",
+  identifying: "Detecting IDs...",
+  summarizing: "Summarizing...",
+  saving: "Saving...",
+};

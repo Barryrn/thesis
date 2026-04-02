@@ -9,6 +9,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, GripVertical, Trash2, MoreHorizontal, Check } from "lucide-react";
+import { PROCESSING_STEP_LABELS } from "@/lib/types";
 import type { Paper, DragData, PaperGroup, GroupId } from "@/lib/types";
 
 interface LibraryPaperCardProps {
@@ -29,14 +30,6 @@ const statusColors: Record<string, string> = {
   failed: "bg-destructive",
 };
 
-/// Maps processingStep values to short user-facing labels.
-const STEP_LABELS: Record<string, string> = {
-  downloading: "Downloading...",
-  extracting: "Extracting...",
-  identifying: "Detecting IDs...",
-  summarizing: "Summarizing...",
-  saving: "Saving...",
-};
 
 function formatAuthors(authors: string[]): string {
   if (authors.length === 0) return "Unknown authors";
@@ -209,7 +202,7 @@ export default function LibraryPaperCard({
           </p>
           {paper.status === "processing" && paper.processingStep && (
             <p className="text-[10px] text-dusty-blue mt-0.5 animate-pulse">
-              {STEP_LABELS[paper.processingStep] ?? "Processing..."}
+              {PROCESSING_STEP_LABELS[paper.processingStep] ?? "Processing..."}
             </p>
           )}
         </div>

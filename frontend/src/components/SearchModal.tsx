@@ -105,6 +105,9 @@ export default function SearchModal({ onClose, onSelectSection }: SearchModalPro
       {/* Modal */}
       <div
         className="relative w-full max-w-lg bg-card border border-border/50 rounded-xl shadow-2xl overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search excerpts"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
@@ -122,6 +125,7 @@ export default function SearchModal({ onClose, onSelectSection }: SearchModalPro
             <button
               onClick={() => setQuery("")}
               className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear search"
             >
               <X className="size-3.5" />
             </button>

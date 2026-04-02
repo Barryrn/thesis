@@ -339,9 +339,15 @@ export const updateExcerpt = mutation({
     if (args.excerptText !== undefined) patch.excerptText = args.excerptText;
     if (args.relevanceNote !== undefined) patch.relevanceNote = args.relevanceNote;
     if (args.pageNumber !== undefined) {
-      patch.pageNumber = args.pageNumber || undefined;
-      // User has manually verified/set the page number, clear the approximate flag
-      patch.pageNumberApproximate = false;
+      if (args.pageNumber) {
+        // User has manually verified/set a concrete page number
+        patch.pageNumber = args.pageNumber;
+        patch.pageNumberApproximate = false;
+      } else {
+        // Clearing the page number — also clear the approximate flag
+        patch.pageNumber = undefined;
+        patch.pageNumberApproximate = undefined;
+      }
     }
     await ctx.db.patch(args.excerptId, patch);
   },
@@ -488,10 +494,26 @@ export const getAllExcerptsWithContext = query({
   handler: async (ctx) => {
     const excerpts = await ctx.db.query("matchExcerpts").collect();
 
+    // Batch-fetch unique papers and sections to avoid N+1 queries
+    const paperIds = [...new Set(excerpts.map((e) => e.paperId))];
+    const sectionIds = [...new Set(excerpts.map((e) => e.sectionId))];
+
+    const [papers, sections] = await Promise.all([
+      Promise.all(paperIds.map((id) => ctx.db.get(id))),
+      Promise.all(sectionIds.map((id) => ctx.db.get(id))),
+    ]);
+
+    const paperById = new Map(
+      paperIds.map((id, i) => [id, papers[i]] as const)
+    );
+    const sectionById = new Map(
+      sectionIds.map((id, i) => [id, sections[i]] as const)
+    );
+
     const results = [];
     for (const excerpt of excerpts) {
-      const paper = await ctx.db.get(excerpt.paperId);
-      const section = await ctx.db.get(excerpt.sectionId);
+      const paper = paperById.get(excerpt.paperId);
+      const section = sectionById.get(excerpt.sectionId);
 
       if (paper && section) {
         results.push({

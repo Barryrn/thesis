@@ -16,15 +16,7 @@ import {
 import OutlineEditor from "@/components/OutlineEditor";
 import UploadZone from "@/components/UploadZone";
 import LanguageSelector from "@/components/LanguageSelector";
-
-/// Maps processingStep values to user-friendly labels shown during processing.
-const STEP_LABELS: Record<string, string> = {
-  downloading: "Downloading...",
-  extracting: "Extracting text...",
-  identifying: "Detecting IDs...",
-  summarizing: "Summarizing...",
-  saving: "Saving...",
-};
+import { PROCESSING_STEP_LABELS } from "@/lib/types";
 
 function StatusBadge({
   status,
@@ -35,7 +27,7 @@ function StatusBadge({
 }) {
   // Show the specific pipeline step when processing
   if (status === "processing" && processingStep) {
-    const stepLabel = STEP_LABELS[processingStep] ?? "Processing...";
+    const stepLabel = PROCESSING_STEP_LABELS[processingStep] ?? "Processing...";
     return (
       <Badge className="text-xs bg-yellow-500 text-white animate-pulse">
         {stepLabel}
