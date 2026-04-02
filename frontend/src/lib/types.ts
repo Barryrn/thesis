@@ -107,6 +107,12 @@ export interface MatchExcerpt {
   pageNumberApproximate?: boolean;
 }
 
+/// Supported citation formatting styles for the preview pane.
+export type CitationStyle = "apa" | "ieee";
+
+/// AI text optimization modes available in the write tab toolbar.
+export type OptimizeMode = "enhance" | "formalize" | "simplify" | "expand";
+
 /// Maps processingStep values to user-friendly labels shown during paper processing.
 export const PROCESSING_STEP_LABELS: Record<string, string> = {
   downloading: "Downloading...",

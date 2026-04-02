@@ -22,6 +22,7 @@ import DocumentLibrary from "@/components/DocumentLibrary";
 import DocumentPreviewModal from "@/components/DocumentPreviewModal";
 import SearchModal from "@/components/SearchModal";
 import { Search } from "lucide-react";
+import { PYTHON_SERVICE_URL } from "@/lib/config";
 import type { ActiveSection, DragData, PaperId, SectionId, Paper } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -93,7 +94,7 @@ export default function Dashboard() {
       setCitingSections((prev) => new Set([...prev, ...sectionIds]));
 
       try {
-        await fetch("http://localhost:8000/cite", {
+        await fetch(`${PYTHON_SERVICE_URL}/cite`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

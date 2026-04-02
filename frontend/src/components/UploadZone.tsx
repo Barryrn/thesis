@@ -3,6 +3,7 @@ import { useMutation, useQuery, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/lib/LanguageContext";
+import { PYTHON_SERVICE_URL } from "@/lib/config";
 import type { UploadFileState } from "@/lib/types";
 
 const ACCEPTED_TYPES = [
@@ -13,7 +14,6 @@ const ACCEPTED_TYPES = [
 const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".txt"];
 
 const MAX_FOLDER_FILES = 50;
-const PYTHON_SERVICE_URL = "http://localhost:8000";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
