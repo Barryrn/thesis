@@ -14,6 +14,7 @@ import convex_client
 import extractor
 import identifier
 import mapper
+import optimizer
 import summarizer
 from pipeline_logger import get_logger, set_paper_context, PipelineStep
 
@@ -219,6 +220,48 @@ async def cite(req: CiteRequest):
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+
+class OptimizeRequest(BaseModel):
+    """Request body for AI text optimization."""
+    text: str
+    mode: str  # "enhance" | "formalize" | "simplify" | "expand"
+    context_before: str = ""
+    context_after: str = ""
+    language: str = "en"
+
+
+@app.post("/optimize")
+async def optimize_text(req: OptimizeRequest):
+    """Optimize selected thesis text using AI.
+
+    Supports four modes: enhance, formalize, simplify, expand.
+    Expects citation placeholders ([REF1], [REF2]) to be preserved by the AI.
+    """
+    logger = get_logger()
+    logger.info(
+        f"Optimize started: mode={req.mode}, text_len={len(req.text)}, language={req.language}",
+        extra={"step": "optimize", "status": "started"},
+    )
+
+    try:
+        result = optimizer.optimize(
+            text=req.text,
+            mode=req.mode,
+            context_before=req.context_before,
+            context_after=req.context_after,
+            language=req.language,
+        )
+        logger.info("Optimize completed", extra={"step": "optimize", "status": "completed"})
+        return {"optimized": result}
+    except ValueError as e:
+        return JSONResponse(status_code=422, content={"detail": str(e)})
+    except Exception as e:
+        logger.error(
+            f"Optimize failed: {type(e).__name__}: {e}",
+            extra={"step": "optimize", "status": "failed"},
+        )
+        return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
 def _get_suffix(url: str) -> str:

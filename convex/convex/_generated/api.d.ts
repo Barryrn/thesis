@@ -13,6 +13,7 @@ import type * as http from "../http.js";
 import type * as matches from "../matches.js";
 import type * as outline from "../outline.js";
 import type * as papers from "../papers.js";
+import type * as sectionContent from "../sectionContent.js";
 import type * as summaries from "../summaries.js";
 
 import type {
@@ -27,6 +28,7 @@ declare const fullApi: ApiFromModules<{
   matches: typeof matches;
   outline: typeof outline;
   papers: typeof papers;
+  sectionContent: typeof sectionContent;
   summaries: typeof summaries;
 }>;
 

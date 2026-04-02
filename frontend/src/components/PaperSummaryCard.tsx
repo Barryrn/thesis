@@ -165,8 +165,15 @@ function ExcerptItem({
         &ldquo;{excerpt.excerptText}&rdquo;
       </blockquote>
       {excerpt.pageNumber && (
-        <p className="text-[10px] text-muted-foreground/60 pl-3">
-          p. {excerpt.pageNumber}
+        <p
+          className="text-[10px] text-muted-foreground/60 pl-3"
+          title={
+            excerpt.pageNumberApproximate
+              ? "Approximate \u2014 page number could not be verified from the PDF"
+              : undefined
+          }
+        >
+          {excerpt.pageNumberApproximate ? "~" : ""}p. {excerpt.pageNumber}
         </p>
       )}
       <div className="flex items-start justify-between">

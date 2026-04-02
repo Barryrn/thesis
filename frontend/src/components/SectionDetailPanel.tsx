@@ -6,14 +6,16 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { api } from "../../convex/_generated/api";
-import { BookOpen, ArrowDownWideNarrow, Quote, ChevronDown, StickyNote, Pencil } from "lucide-react";
+import { BookOpen, ArrowDownWideNarrow, Quote, ChevronDown, StickyNote, Pencil, PenLine } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import PaperSummaryCard from "./PaperSummaryCard";
+import SectionWriteEditor from "./SectionWriteEditor";
 import type { ActiveSection, SectionId } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type PaperSort = "relevance" | "excerpts" | "manual";
+type CenterTab = "papers" | "write";
 
 interface SectionDetailPanelProps {
   activeSection: ActiveSection | null;
@@ -61,6 +63,12 @@ function SectionContent({
   onMatchOrderChange?: (matchIds: Id<"paperSectionMatches">[]) => void;
 }) {
   const [sortBy, setSortBy] = useState<PaperSort>("relevance");
+  const [activeTab, setActiveTab] = useState<CenterTab>("papers");
+
+  // Reset tab when switching sections
+  useEffect(() => {
+    setActiveTab("papers");
+  }, [activeSection.sectionId]);
 
   const matches =
     useQuery(api.matches.getMatchesBySection, {
@@ -120,91 +128,129 @@ function SectionContent({
           notes={activeSection.notes}
           sectionId={activeSection.sectionId}
         />
-        <div className="flex items-center justify-between mt-1.5">
-          <p className="text-sm text-muted-foreground">
-            {matches.length === 0
-              ? "No papers assigned"
-              : `${matches.length} paper${matches.length !== 1 ? "s" : ""} assigned`}
-          </p>
 
-          {matches.length > 1 && (
-            <div className="flex items-center gap-1">
-              <ArrowDownWideNarrow className="size-3 text-muted-foreground/60" />
-              <button
-                onClick={() => setSortBy("relevance")}
-                className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
-                  sortBy === "relevance"
-                    ? "bg-amber/10 text-amber"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Relevance
-              </button>
-              <button
-                onClick={() => setSortBy("excerpts")}
-                className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
-                  sortBy === "excerpts"
-                    ? "bg-amber/10 text-amber"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Excerpts
-              </button>
-              <button
-                onClick={() => setSortBy("manual")}
-                className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
-                  sortBy === "manual"
-                    ? "bg-amber/10 text-amber"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Manual
-              </button>
-            </div>
-          )}
+        {/* Tab toggle: Papers / Write */}
+        <div className="flex items-center gap-1 mt-3">
+          <button
+            onClick={() => setActiveTab("papers")}
+            className={`text-[11px] px-3 py-1 rounded-full transition-colors flex items-center gap-1.5 ${
+              activeTab === "papers"
+                ? "bg-amber/10 text-amber"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <BookOpen className="size-3" />
+            Papers
+            {matches.length > 0 && (
+              <span className="text-[10px] opacity-60">{matches.length}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("write")}
+            className={`text-[11px] px-3 py-1 rounded-full transition-colors flex items-center gap-1.5 ${
+              activeTab === "write"
+                ? "bg-amber/10 text-amber"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <PenLine className="size-3" />
+            Write
+          </button>
         </div>
+
+        {/* Sort controls — only visible on Papers tab */}
+        {activeTab === "papers" && (
+          <div className="flex items-center justify-between mt-1.5">
+            <p className="text-sm text-muted-foreground">
+              {matches.length === 0
+                ? "No papers assigned"
+                : `${matches.length} paper${matches.length !== 1 ? "s" : ""} assigned`}
+            </p>
+
+            {matches.length > 1 && (
+              <div className="flex items-center gap-1">
+                <ArrowDownWideNarrow className="size-3 text-muted-foreground/60" />
+                <button
+                  onClick={() => setSortBy("relevance")}
+                  className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
+                    sortBy === "relevance"
+                      ? "bg-amber/10 text-amber"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Relevance
+                </button>
+                <button
+                  onClick={() => setSortBy("excerpts")}
+                  className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
+                    sortBy === "excerpts"
+                      ? "bg-amber/10 text-amber"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Excerpts
+                </button>
+                <button
+                  onClick={() => setSortBy("manual")}
+                  className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
+                    sortBy === "manual"
+                      ? "bg-amber/10 text-amber"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Manual
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Drop zone / paper list */}
-      <div
-        className={`rounded-lg transition-all ${
-          isOver ? "ring-2 ring-amber/30 bg-amber/5" : ""
-        }`}
-      >
-        {matches.length === 0 ? (
-          <div className="border-2 border-dashed border-border/30 rounded-lg py-16 text-center">
-            <p className="text-sm text-muted-foreground">
-              Drag papers here to assign them to this section
-            </p>
-          </div>
-        ) : sortBy === "manual" ? (
-          <SortableContext
-            items={sortedMatches.map((m) => m.matchId)}
-            strategy={verticalListSortingStrategy}
-          >
+      {/* Tab content */}
+      {activeTab === "write" ? (
+        <SectionWriteEditor activeSection={activeSection} />
+      ) : (
+        /* Drop zone / paper list */
+        <div
+          className={`rounded-lg transition-all ${
+            isOver ? "ring-2 ring-amber/30 bg-amber/5" : ""
+          }`}
+        >
+          {matches.length === 0 ? (
+            <div className="border-2 border-dashed border-border/30 rounded-lg py-16 text-center">
+              <p className="text-sm text-muted-foreground">
+                Drag papers here to assign them to this section
+              </p>
+            </div>
+          ) : sortBy === "manual" ? (
+            <SortableContext
+              items={sortedMatches.map((m) => m.matchId)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-4">
+                {sortedMatches.map((m) => (
+                  <PaperSummaryCard
+                    key={m.matchId}
+                    match={m}
+                    sectionId={activeSection.sectionId}
+                    sortable
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          ) : (
             <div className="space-y-4">
               {sortedMatches.map((m) => (
                 <PaperSummaryCard
                   key={m.matchId}
                   match={m}
                   sectionId={activeSection.sectionId}
-                  sortable
                 />
               ))}
             </div>
-          </SortableContext>
-        ) : (
-          <div className="space-y-4">
-            {sortedMatches.map((m) => (
-              <PaperSummaryCard
-                key={m.matchId}
-                match={m}
-                sectionId={activeSection.sectionId}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
