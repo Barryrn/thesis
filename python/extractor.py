@@ -69,6 +69,7 @@ def _extract_pdf(file_path: str) -> tuple[str, str]:
 
     # --- First pass: collect raw page texts ---
     page_texts: list[str] = []
+    running_chars = 0
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
             page_text = page.extract_text()
@@ -76,7 +77,8 @@ def _extract_pdf(file_path: str) -> tuple[str, str]:
                 page_texts.append("")
                 continue
             page_texts.append(page_text)
-            if sum(len(t) for t in page_texts) >= MAX_TEXT_LENGTH:
+            running_chars += len(page_text)
+            if running_chars >= MAX_TEXT_LENGTH:
                 break
 
     # If pdfplumber extracted almost nothing, fall back to PyMuPDF for text
@@ -89,10 +91,13 @@ def _extract_pdf(file_path: str) -> tuple[str, str]:
         import fitz
 
         page_texts = []
+        running_chars = 0
         doc = fitz.open(file_path)
         for page in doc:
-            page_texts.append(page.get_text())
-            if sum(len(t) for t in page_texts) >= MAX_TEXT_LENGTH:
+            text = page.get_text()
+            page_texts.append(text)
+            running_chars += len(text)
+            if running_chars >= MAX_TEXT_LENGTH:
                 break
         doc.close()
 
@@ -212,9 +217,9 @@ def _resolve_page_regex(page_texts: list[str]) -> tuple[dict[int, str] | None, s
     offsets = [num - phys for phys, num in detected]
     avg_offset = round(sum(offsets) / len(offsets))
 
-    # Guard: if the offset would produce negative page labels, the regex
+    # Guard: if the offset would produce non-positive page labels, the regex
     # probably picked up non-page-number digits from headers/footers.
-    if 1 + avg_offset < 0:
+    if avg_offset < 0:
         return None, ""
 
     label_map = {
