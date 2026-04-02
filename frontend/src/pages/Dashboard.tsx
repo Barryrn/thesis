@@ -20,13 +20,14 @@ import OutlineSidebar from "@/components/OutlineSidebar";
 import SectionDetailPanel from "@/components/SectionDetailPanel";
 import DocumentLibrary from "@/components/DocumentLibrary";
 import DocumentPreviewModal from "@/components/DocumentPreviewModal";
+import { useLanguage } from "@/lib/LanguageContext";
 import type { ActiveSection, DragData, PaperId, SectionId, Paper } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
 
 export default function Dashboard() {
+  const { language } = useLanguage();
   const papers = useQuery(api.papers.listPapers) ?? [];
   const sections = useQuery(api.outline.listSections) ?? [];
-  const addMatch = useMutation(api.matches.addMatch);
   const updateMatch = useMutation(api.matches.updateMatch);
   const reorderMatches = useMutation(api.matches.reorderMatches);
   const reorderLibrary = useMutation(api.papers.reorderLibrary);
@@ -92,7 +93,7 @@ export default function Dashboard() {
               orderNumber: s.orderNumber,
               notes: s.notes,
             })),
-            language: "en",
+            language,
           }),
         });
       } catch (err) {
@@ -105,7 +106,7 @@ export default function Dashboard() {
         });
       }
     },
-    [papers, sections]
+    [papers, sections, language]
   );
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -170,13 +171,9 @@ export default function Dashboard() {
         });
       }
     } else {
-      // Center-panel drop → manual add (no GPT, immediate)
+      // Center-panel drop → also trigger GPT citation workflow
       if (sourceSectionId === null) {
-        await addMatch({
-          paperId,
-          sectionId: targetSectionId,
-          relevanceScore: 1.0,
-        });
+        await triggerCitation(paperId, [targetSectionId]);
       } else if (sourceSectionId !== targetSectionId) {
         await updateMatch({
           paperId,
