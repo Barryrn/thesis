@@ -48,6 +48,7 @@ async def process(req: ProcessRequest):
     tmp_path = None
     try:
         # 1. Download file to temp dir
+        convex_client.update_processing_step(req.paperId, "downloading")
         suffix = _get_suffix(req.fileUrl)
         with PipelineStep("download_file", detail=f"suffix={suffix}"):
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
@@ -57,6 +58,7 @@ async def process(req: ProcessRequest):
             logger.debug(f"Downloaded {file_size} bytes to {tmp_path}", extra={"step": "download_file"})
 
         # 2. Extract text + metadata
+        convex_client.update_processing_step(req.paperId, "extracting")
         with PipelineStep("extract_text", detail=f"format={suffix}"):
             extracted = extractor.extract(tmp_path)
             logger.debug(
@@ -66,6 +68,7 @@ async def process(req: ProcessRequest):
             )
 
         # 3. Detect identifiers
+        convex_client.update_processing_step(req.paperId, "identifying")
         with PipelineStep("detect_identifiers"):
             identifiers = identifier.detect(extracted["text"])
             logger.info(
@@ -74,6 +77,7 @@ async def process(req: ProcessRequest):
             )
 
         # 4. Summarize
+        convex_client.update_processing_step(req.paperId, "summarizing")
         with PipelineStep("summarize", detail=f"text_len={len(extracted['text'])}, language={req.language}"):
             summary = summarizer.summarize(extracted["text"], language=req.language)
             logger.debug(
@@ -82,6 +86,7 @@ async def process(req: ProcessRequest):
             )
 
         # 5. Save to Convex (summary only — citation happens on-demand via /cite)
+        convex_client.update_processing_step(req.paperId, "saving")
         with PipelineStep("save_to_convex"):
             if req.fileName:
                 title = os.path.splitext(req.fileName)[0]
@@ -168,8 +173,9 @@ async def cite(req: CiteRequest):
 
         with PipelineStep("extract_text", detail=f"format={suffix}"):
             extracted = extractor.extract(tmp_path)
+            page_source = extracted.get("page_source", "approximate")
             logger.debug(
-                f"Extracted {len(extracted['text'])} chars for citation",
+                f"Extracted {len(extracted['text'])} chars for citation (page_source={page_source})",
                 extra={"step": "extract_text"},
             )
 
@@ -194,7 +200,7 @@ async def cite(req: CiteRequest):
 
         # Upsert citation matches (preserves other sections' matches)
         with PipelineStep("save_citation_matches"):
-            convex_client.save_citation_matches(req.paperId, scores)
+            convex_client.save_citation_matches(req.paperId, scores, page_source=page_source)
 
         logger.info(
             f"Citation completed: {len(matched)} sections matched",

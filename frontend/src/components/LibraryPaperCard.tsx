@@ -29,6 +29,15 @@ const statusColors: Record<string, string> = {
   failed: "bg-destructive",
 };
 
+/// Maps processingStep values to short user-facing labels.
+const STEP_LABELS: Record<string, string> = {
+  downloading: "Downloading...",
+  extracting: "Extracting...",
+  identifying: "Detecting IDs...",
+  summarizing: "Summarizing...",
+  saving: "Saving...",
+};
+
 function formatAuthors(authors: string[]): string {
   if (authors.length === 0) return "Unknown authors";
   if (authors.length <= 2) return authors.join(", ");
@@ -198,6 +207,11 @@ export default function LibraryPaperCard({
             {formatAuthors(paper.authors)}
             {paper.year ? ` (${paper.year})` : ""}
           </p>
+          {paper.status === "processing" && paper.processingStep && (
+            <p className="text-[10px] text-dusty-blue mt-0.5 animate-pulse">
+              {STEP_LABELS[paper.processingStep] ?? "Processing..."}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">

@@ -40,11 +40,37 @@ export const updatePaperStatus = mutation({
     errorMessage: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const patch: Record<string, unknown> = { status: args.status };
+    if (args.errorMessage !== undefined) {
+      patch.errorMessage = args.errorMessage;
+    }
+    // Clear processingStep when transitioning to a terminal state
+    if (args.status === "completed" || args.status === "failed") {
+      patch.processingStep = undefined;
+    }
+    await ctx.db.patch(args.paperId, patch);
+  },
+});
+
+/// Updates the current pipeline step for a paper being processed.
+/// Called by the Python backend before each processing stage so the
+/// frontend can show real-time progress.
+export const updateProcessingStep = mutation({
+  args: {
+    paperId: v.id("papers"),
+    step: v.optional(
+      v.union(
+        v.literal("downloading"),
+        v.literal("extracting"),
+        v.literal("identifying"),
+        v.literal("summarizing"),
+        v.literal("saving")
+      )
+    ),
+  },
+  handler: async (ctx, args) => {
     await ctx.db.patch(args.paperId, {
-      status: args.status,
-      ...(args.errorMessage !== undefined && {
-        errorMessage: args.errorMessage,
-      }),
+      processingStep: args.step,
     });
   },
 });

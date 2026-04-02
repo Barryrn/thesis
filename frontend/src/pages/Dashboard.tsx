@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation } from "convex/react";
 import {
@@ -20,6 +20,8 @@ import OutlineSidebar from "@/components/OutlineSidebar";
 import SectionDetailPanel from "@/components/SectionDetailPanel";
 import DocumentLibrary from "@/components/DocumentLibrary";
 import DocumentPreviewModal from "@/components/DocumentPreviewModal";
+import SearchModal from "@/components/SearchModal";
+import { Search } from "lucide-react";
 import type { ActiveSection, DragData, PaperId, SectionId, Paper } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -45,6 +47,19 @@ export default function Dashboard() {
   const [citingSections, setCitingSections] = useState<Set<SectionId>>(
     new Set()
   );
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Register Cmd+K / Ctrl+K keyboard shortcut for search
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -203,15 +218,30 @@ export default function Dashboard() {
             failed={failed}
           />
         </div>
-        <Link to="/upload#upload">
+        <div className="flex items-center gap-2">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="border-amber/20 text-amber hover:bg-amber/10 hover:text-amber"
+            onClick={() => setSearchOpen(true)}
+            className="text-muted-foreground hover:text-amber gap-1.5"
+            title="Search excerpts (Cmd+K)"
           >
-            Upload Papers
+            <Search className="size-3.5" />
+            <span className="hidden sm:inline text-xs">Search</span>
+            <kbd className="hidden sm:inline-flex items-center px-1 py-0.5 text-[9px] text-muted-foreground/50 bg-muted/20 rounded border border-border/20 font-mono ml-1">
+              {"\u2318"}K
+            </kbd>
           </Button>
-        </Link>
+          <Link to="/upload#upload">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-amber/20 text-amber hover:bg-amber/10 hover:text-amber"
+            >
+              Upload Papers
+            </Button>
+          </Link>
+        </div>
       </header>
 
       {/* 3-panel layout */}
@@ -275,6 +305,14 @@ export default function Dashboard() {
           paper={previewPaper}
           onClose={() => setPreviewPaper(null)}
           onCite={triggerCitation}
+        />
+      )}
+
+      {/* Global excerpt search modal (Cmd+K) */}
+      {searchOpen && (
+        <SearchModal
+          onClose={() => setSearchOpen(false)}
+          onSelectSection={setActiveSection}
         />
       )}
     </div>

@@ -51,6 +51,7 @@ export const upsertCitationMatches = mutation({
         relevanceNote: v.string(),
         orderIndex: v.number(),
         pageNumber: v.optional(v.string()),
+        pageNumberApproximate: v.optional(v.boolean()),
       })
     ),
   },
@@ -110,6 +111,7 @@ export const upsertCitationMatches = mutation({
           orderIndex: excerpt.orderIndex,
           isManual: false,
           pageNumber: excerpt.pageNumber ?? undefined,
+          pageNumberApproximate: excerpt.pageNumberApproximate ?? undefined,
         });
       }
     }
@@ -184,6 +186,7 @@ export const createExcerpts = mutation({
         relevanceNote: v.string(),
         orderIndex: v.number(),
         pageNumber: v.optional(v.string()),
+        pageNumberApproximate: v.optional(v.boolean()),
       })
     ),
   },
@@ -199,6 +202,7 @@ export const createExcerpts = mutation({
         orderIndex: excerpt.orderIndex,
         isManual: false,
         pageNumber: excerpt.pageNumber,
+        pageNumberApproximate: excerpt.pageNumberApproximate ?? undefined,
       });
       ids.push(id);
     }
@@ -331,10 +335,14 @@ export const updateExcerpt = mutation({
     pageNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const patch: Record<string, string | undefined> = {};
+    const patch: Record<string, string | boolean | undefined> = {};
     if (args.excerptText !== undefined) patch.excerptText = args.excerptText;
     if (args.relevanceNote !== undefined) patch.relevanceNote = args.relevanceNote;
-    if (args.pageNumber !== undefined) patch.pageNumber = args.pageNumber || undefined;
+    if (args.pageNumber !== undefined) {
+      patch.pageNumber = args.pageNumber || undefined;
+      // User has manually verified/set the page number, clear the approximate flag
+      patch.pageNumberApproximate = false;
+    }
     await ctx.db.patch(args.excerptId, patch);
   },
 });
@@ -469,6 +477,40 @@ export const getExcerptsByPaperSection = query({
 
     excerpts.sort((a, b) => a.orderIndex - b.orderIndex);
     return excerpts;
+  },
+});
+
+/// Returns all excerpts joined with their parent paper and section metadata.
+/// Used by the global search modal to enable client-side filtering across
+/// all collected excerpts.
+export const getAllExcerptsWithContext = query({
+  args: {},
+  handler: async (ctx) => {
+    const excerpts = await ctx.db.query("matchExcerpts").collect();
+
+    const results = [];
+    for (const excerpt of excerpts) {
+      const paper = await ctx.db.get(excerpt.paperId);
+      const section = await ctx.db.get(excerpt.sectionId);
+
+      if (paper && section) {
+        results.push({
+          excerptId: excerpt._id,
+          excerptText: excerpt.excerptText,
+          relevanceNote: excerpt.relevanceNote,
+          pageNumber: excerpt.pageNumber,
+          paperId: paper._id,
+          paperTitle: paper.title,
+          paperAuthors: paper.authors,
+          sectionId: section._id,
+          sectionTitle: section.title,
+          sectionOrderNumber: section.orderNumber,
+          sectionDepth: section.depth,
+          sectionNotes: section.notes,
+        });
+      }
+    }
+    return results;
   },
 });
 
