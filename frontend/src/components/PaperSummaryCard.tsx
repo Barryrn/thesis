@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -23,14 +23,19 @@ import {
   FlaskConical,
   FileText,
   Unlink,
+  BookOpen,
+  Loader2,
+  RotateCcw,
 } from "lucide-react";
 import type {
   SectionMatch,
   SectionId,
   DragData,
   MatchExcerpt,
+  SourceType,
 } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
+import { PYTHON_SERVICE_URL } from "@/lib/config";
 
 interface PaperSummaryCardProps {
   match: SectionMatch;
@@ -91,6 +96,845 @@ function CollapsibleSection({
         />
       </button>
       {expanded && <div className="mt-2">{children}</div>}
+    </div>
+  );
+}
+
+// --- Source type labels for the dropdown ---
+
+/// Human-readable labels for each source type, following HKA bibliography rules.
+const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
+  book: "Buch",
+  bookChapter: "Buchkapitel (Sammelband)",
+  journalArticle: "Zeitschriftenaufsatz",
+  newspaperArticle: "Zeitungsartikel",
+  internetSource: "Internetquelle",
+};
+
+/// All source type options in display order.
+const SOURCE_TYPE_OPTIONS: SourceType[] = [
+  "book",
+  "bookChapter",
+  "journalArticle",
+  "newspaperArticle",
+  "internetSource",
+];
+
+// --- Form field state for the source edit form ---
+
+/// Holds the editable fields of a bibliography source record.
+interface SourceFormState {
+  kuerzel: string;
+  kuerzelManualOverride: boolean;
+  sourceType: SourceType;
+  publisher: string;
+  publisherLocation: string;
+  edition: string;
+  journalName: string;
+  volume: string;
+  issue: string;
+  pageStart: string;
+  pageEnd: string;
+  editorNames: string;
+  editorBookTitle: string;
+  newspaperName: string;
+  publishDate: string;
+  url: string;
+  accessDate: string;
+}
+
+/// Returns a blank form state with sensible defaults.
+function emptyFormState(): SourceFormState {
+  return {
+    kuerzel: "",
+    kuerzelManualOverride: false,
+    sourceType: "book",
+    publisher: "",
+    publisherLocation: "",
+    edition: "",
+    journalName: "",
+    volume: "",
+    issue: "",
+    pageStart: "",
+    pageEnd: "",
+    editorNames: "",
+    editorBookTitle: "",
+    newspaperName: "",
+    publishDate: "",
+    url: "",
+    accessDate: "",
+  };
+}
+
+// --- PaperMetadataForm sub-component ---
+
+/// Inline editor for paper metadata (title, authors, year, DOI).
+/// Allows users to correct auto-extracted metadata from the PDF.
+function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
+  const paper = useQuery(api.papers.getPaper, { paperId });
+  const identifiers = useQuery(api.summaries.getIdentifiersByPaper, { paperId });
+  const updateMetadata = useMutation(api.papers.updatePaperMetadata);
+  const upsertIdentifier = useMutation(api.summaries.upsertIdentifier);
+  const regenerateKuerzel = useMutation(api.sources.regenerateKuerzel);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [title, setTitle] = useState("");
+  const [authorsStr, setAuthorsStr] = useState("");
+  const [yearStr, setYearStr] = useState("");
+  const [doi, setDoi] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  /// Current DOI from the identifiers table.
+  const currentDoi = identifiers?.find((id) => id.identifierType === "DOI")?.identifierValue ?? "";
+
+  /// Sync local state from server data when paper loads or changes.
+  useEffect(() => {
+    if (paper && !isEditing) {
+      setTitle(paper.title);
+      setAuthorsStr(paper.authors.join(", "));
+      setYearStr(paper.year ? String(paper.year) : "");
+    }
+  }, [paper, isEditing]);
+
+  /// Sync DOI from identifiers query.
+  useEffect(() => {
+    if (!isEditing) {
+      setDoi(currentDoi);
+    }
+  }, [currentDoi, isEditing]);
+
+  /// Saves changed metadata and regenerates Kürzel if authors/year changed.
+  const handleSave = useCallback(async () => {
+    if (!paper) return;
+    setSaving(true);
+    try {
+      const authors = authorsStr
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean);
+      const year = yearStr ? parseInt(yearStr, 10) : undefined;
+
+      await updateMetadata({
+        paperId,
+        title,
+        authors,
+        year: isNaN(year as number) ? undefined : year,
+      });
+
+      // Save DOI if changed
+      if (doi.trim() !== currentDoi) {
+        if (doi.trim()) {
+          await upsertIdentifier({
+            paperId,
+            identifierType: "DOI",
+            identifierValue: doi.trim(),
+          });
+        }
+      }
+
+      // Regenerate Kürzel when authors or year change
+      const authorsChanged = authors.join(",") !== paper.authors.join(",");
+      const yearChanged = year !== paper.year;
+      if (authorsChanged || yearChanged) {
+        try {
+          await regenerateKuerzel({ paperId });
+        } catch {
+          // Non-fatal — Kürzel can be edited manually
+        }
+      }
+
+      setIsEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }, [paper, paperId, title, authorsStr, yearStr, doi, currentDoi, updateMetadata, upsertIdentifier, regenerateKuerzel]);
+
+  if (!paper) return null;
+
+  if (!isEditing) {
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
+            Titel
+          </span>
+          <button
+            onClick={() => setIsEditing(true)}
+            className="text-muted-foreground/40 hover:text-amber transition-colors"
+            title="Metadaten bearbeiten"
+          >
+            <Pencil className="size-3" />
+          </button>
+        </div>
+        <p className="text-sm text-foreground/80">{paper.title}</p>
+        <span className="text-[11px] text-muted-foreground uppercase tracking-wider block mt-2">
+          Autoren
+        </span>
+        <p className="text-sm text-foreground/80">
+          {paper.authors.join(", ") || "Keine Autoren"}
+        </p>
+        <div className="flex gap-8 mt-2">
+          <div>
+            <span className="text-[11px] text-muted-foreground uppercase tracking-wider block">
+              Jahr
+            </span>
+            <p className="text-sm text-foreground/80">
+              {paper.year ?? "–"}
+            </p>
+          </div>
+          <div>
+            <span className="text-[11px] text-muted-foreground uppercase tracking-wider block">
+              DOI
+            </span>
+            <p className="text-sm text-foreground/80">
+              {currentDoi || "–"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
+          Titel
+        </label>
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full bg-transparent border border-border/30 rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-amber/40"
+        />
+      </div>
+      <div>
+        <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
+          Autoren (kommagetrennt)
+        </label>
+        <input
+          type="text"
+          value={authorsStr}
+          onChange={(e) => setAuthorsStr(e.target.value)}
+          placeholder="Max Müller, Anna Schmidt"
+          className="w-full bg-transparent border border-border/30 rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-amber/40"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
+            Jahr
+          </label>
+          <input
+            type="text"
+            value={yearStr}
+            onChange={(e) => setYearStr(e.target.value)}
+            placeholder="2023"
+            className="w-full bg-transparent border border-border/30 rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-amber/40"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
+            DOI
+          </label>
+          <input
+            type="text"
+            value={doi}
+            onChange={(e) => setDoi(e.target.value)}
+            placeholder="10.1000/xyz123"
+            className="w-full bg-transparent border border-border/30 rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-amber/40"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="text-[11px] px-3 py-1 rounded-full bg-amber/10 text-amber hover:bg-amber/20 transition-colors disabled:opacity-50"
+        >
+          {saving ? "Speichern..." : "Speichern"}
+        </button>
+        <button
+          onClick={() => setIsEditing(false)}
+          className="text-[11px] px-3 py-1 rounded-full text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Abbrechen
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// --- SourceEditForm sub-component ---
+
+/// Inline bibliography source editor embedded in the PaperSummaryCard.
+/// Loads source data from Convex, provides type-specific fields, and
+/// supports DOI-based metadata auto-fill via the Python service.
+function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
+  const source = useQuery(api.sources.getSourceByPaper, { paperId });
+  const identifiers = useQuery(api.summaries.getIdentifiersByPaper, { paperId });
+  const updateSource = useMutation(api.sources.updateSource);
+  const regenerateKuerzel = useMutation(api.sources.regenerateKuerzel);
+  const createSource = useMutation(api.sources.createSource);
+
+  /// Auto-create a source record if one doesn't exist for this paper.
+  /// This handles papers uploaded before the sources table was added.
+  const [autoCreating, setAutoCreating] = useState(false);
+  useEffect(() => {
+    if (source === null && !autoCreating) {
+      setAutoCreating(true);
+      createSource({ paperId, sourceType: "book" })
+        .catch((err: unknown) => {
+          // Ignore "already exists" errors from race conditions
+          if (!(err instanceof Error) || !err.message.includes("already exists")) {
+            console.error("[SOURCE] Auto-create failed:", err);
+          }
+        })
+        .finally(() => setAutoCreating(false));
+    }
+  }, [source, paperId, createSource, autoCreating]);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingKuerzel, setEditingKuerzel] = useState(false);
+  const [form, setForm] = useState<SourceFormState>(emptyFormState);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
+  /// Sync local form state when the source record loads or changes.
+  useEffect(() => {
+    if (source) {
+      setForm({
+        kuerzel: source.kuerzel ?? "",
+        kuerzelManualOverride: source.kuerzelManualOverride ?? false,
+        sourceType: (source.sourceType as SourceType) ?? "book",
+        publisher: source.publisher ?? "",
+        publisherLocation: source.publisherLocation ?? "",
+        edition: source.edition ?? "",
+        journalName: source.journalName ?? "",
+        volume: source.volume ?? "",
+        issue: source.issue ?? "",
+        pageStart: source.pageStart ?? "",
+        pageEnd: source.pageEnd ?? "",
+        editorNames: source.editorNames?.join(", ") ?? "",
+        editorBookTitle: source.editorBookTitle ?? "",
+        newspaperName: source.newspaperName ?? "",
+        publishDate: source.publishDate ?? "",
+        url: source.url ?? "",
+        accessDate: source.accessDate ?? "",
+      });
+    }
+  }, [source]);
+
+  /// Update a single form field by key.
+  const setField = useCallback(
+    <K extends keyof SourceFormState>(key: K, value: SourceFormState[K]) => {
+      setForm((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  /// Find the DOI identifier from the paper's identifiers list.
+  const doiIdentifier = identifiers?.find(
+    (id) => id.identifierType === "DOI"
+  );
+
+  /// Fetch metadata from CrossRef/OpenAlex via the Python service and
+  /// pre-fill the form with the returned fields.
+  async function handleLookupMetadata() {
+    if (!doiIdentifier) return;
+    setLookupLoading(true);
+    setLookupError(null);
+    try {
+      const res = await fetch(`${PYTHON_SERVICE_URL}/lookup-metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paperId: paperId,
+          doi: doiIdentifier.identifierValue,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `Lookup failed (${res.status})`);
+      }
+      const data = await res.json();
+
+      // Pre-fill form fields from the metadata response
+      setForm((prev) => ({
+        ...prev,
+        sourceType: data.sourceType ?? prev.sourceType,
+        publisher: data.publisher ?? prev.publisher,
+        journalName: data.journalName ?? prev.journalName,
+        volume: data.volume ?? prev.volume,
+        issue: data.issue ?? prev.issue,
+        pageStart: data.pageStart ?? prev.pageStart,
+        pageEnd: data.pageEnd ?? prev.pageEnd,
+      }));
+    } catch (err) {
+      setLookupError(err instanceof Error ? err.message : "Lookup failed");
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
+  /// Auto-generate a fresh Kuerzel from the paper's authors and year.
+  async function handleAutoGenerateKuerzel() {
+    try {
+      const newKuerzel = await regenerateKuerzel({ paperId });
+      if (newKuerzel) {
+        setField("kuerzel", newKuerzel);
+        setField("kuerzelManualOverride", false);
+      }
+    } catch {
+      // Silently fail — the user can still type manually
+    }
+  }
+
+  /// Persist only the fields that actually changed compared to the current
+  /// source record, minimizing unnecessary writes.
+  async function handleSave() {
+    if (!source) return;
+    setSaving(true);
+    setSaveSuccess(false);
+
+    // Build a patch of only changed fields
+    const patch: Record<string, unknown> = {};
+
+    if (form.sourceType !== source.sourceType) patch.sourceType = form.sourceType;
+    if (form.kuerzel !== source.kuerzel) patch.kuerzel = form.kuerzel;
+    if (form.kuerzelManualOverride !== source.kuerzelManualOverride)
+      patch.kuerzelManualOverride = form.kuerzelManualOverride;
+    if (form.publisher !== (source.publisher ?? "")) patch.publisher = form.publisher;
+    if (form.publisherLocation !== (source.publisherLocation ?? ""))
+      patch.publisherLocation = form.publisherLocation;
+    if (form.edition !== (source.edition ?? "")) patch.edition = form.edition;
+    if (form.journalName !== (source.journalName ?? "")) patch.journalName = form.journalName;
+    if (form.volume !== (source.volume ?? "")) patch.volume = form.volume;
+    if (form.issue !== (source.issue ?? "")) patch.issue = form.issue;
+    if (form.pageStart !== (source.pageStart ?? "")) patch.pageStart = form.pageStart;
+    if (form.pageEnd !== (source.pageEnd ?? "")) patch.pageEnd = form.pageEnd;
+    if (form.newspaperName !== (source.newspaperName ?? ""))
+      patch.newspaperName = form.newspaperName;
+    if (form.publishDate !== (source.publishDate ?? "")) patch.publishDate = form.publishDate;
+    if (form.url !== (source.url ?? "")) patch.url = form.url;
+    if (form.accessDate !== (source.accessDate ?? "")) patch.accessDate = form.accessDate;
+    if (form.editorBookTitle !== (source.editorBookTitle ?? ""))
+      patch.editorBookTitle = form.editorBookTitle;
+
+    // editorNames is stored as an array but edited as comma-separated text
+    const newEditors = form.editorNames
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const oldEditors = source.editorNames ?? [];
+    if (JSON.stringify(newEditors) !== JSON.stringify(oldEditors))
+      patch.editorNames = newEditors;
+
+    // Only call the mutation if something actually changed
+    if (Object.keys(patch).length > 0) {
+      try {
+        await updateSource({ sourceId: source._id, ...patch });
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2000);
+      } catch (err) {
+        console.error("Failed to update source:", err);
+      }
+    }
+
+    setSaving(false);
+    setIsEditing(false);
+  }
+
+  // Still loading
+  if (source === undefined) {
+    return (
+      <div className="flex items-center gap-2 py-2">
+        <Loader2 className="size-3 animate-spin text-muted-foreground" />
+        <span className="text-[11px] text-muted-foreground">Loading source...</span>
+      </div>
+    );
+  }
+
+  // No source record exists for this paper
+  if (source === null) {
+    return (
+      <p className="text-[11px] text-muted-foreground/60 italic py-1">
+        No source details available.
+      </p>
+    );
+  }
+
+  // --- Display mode ---
+  if (!isEditing) {
+    return (
+      <div className="space-y-2.5">
+        {/* Kuerzel badge */}
+        <div className="flex items-center gap-2">
+          <span className="bg-amber/10 text-amber px-2 py-0.5 rounded text-xs font-mono">
+            [{form.kuerzel}]
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            {SOURCE_TYPE_LABELS[form.sourceType]}
+          </span>
+        </div>
+
+        {/* Type-specific fields summary */}
+        <div className="text-sm text-foreground/70 space-y-0.5">
+          {form.publisher && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Verlag:</span>{" "}
+              {form.publisher}
+              {form.publisherLocation && `, ${form.publisherLocation}`}
+            </p>
+          )}
+          {form.edition && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Auflage:</span>{" "}
+              {form.edition}
+            </p>
+          )}
+          {form.journalName && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Zeitschrift:</span>{" "}
+              {form.journalName}
+              {form.volume && `, Vol. ${form.volume}`}
+              {form.issue && ` (${form.issue})`}
+            </p>
+          )}
+          {(form.pageStart || form.pageEnd) && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Seiten:</span>{" "}
+              {form.pageStart}
+              {form.pageEnd && `–${form.pageEnd}`}
+            </p>
+          )}
+          {form.editorNames && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Hrsg.:</span>{" "}
+              {form.editorNames}
+            </p>
+          )}
+          {form.editorBookTitle && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Buchtitel:</span>{" "}
+              {form.editorBookTitle}
+            </p>
+          )}
+          {form.newspaperName && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Zeitung:</span>{" "}
+              {form.newspaperName}
+            </p>
+          )}
+          {form.publishDate && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Datum:</span>{" "}
+              {form.publishDate}
+            </p>
+          )}
+          {form.url && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">URL:</span>{" "}
+              <a
+                href={form.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-amber hover:underline break-all"
+              >
+                {form.url}
+              </a>
+            </p>
+          )}
+          {form.accessDate && (
+            <p>
+              <span className="text-muted-foreground text-[11px]">Zugriff:</span>{" "}
+              {form.accessDate}
+            </p>
+          )}
+        </div>
+
+        {/* Edit trigger */}
+        <button
+          onClick={() => setIsEditing(true)}
+          className="flex items-center gap-1 text-[11px] text-amber-dim/60 hover:text-amber transition-colors"
+        >
+          <Pencil className="size-3" /> Bearbeiten
+        </button>
+
+        {/* Brief save confirmation */}
+        {saveSuccess && (
+          <span className="text-[11px] text-sage ml-2">Gespeichert</span>
+        )}
+      </div>
+    );
+  }
+
+  // --- Edit mode ---
+  return (
+    <div className="space-y-3">
+      {/* Kuerzel row */}
+      <div>
+        <label className="text-[11px] text-muted-foreground uppercase tracking-wider">
+          Kürzel
+        </label>
+        <div className="flex items-center gap-2 mt-1">
+          {editingKuerzel ? (
+            <>
+              <input
+                type="text"
+                value={form.kuerzel}
+                onChange={(e) => {
+                  setField("kuerzel", e.target.value);
+                  setField("kuerzelManualOverride", true);
+                }}
+                className="bg-transparent border border-border/30 rounded px-2 py-1.5 text-sm w-28 font-mono"
+              />
+              <button
+                onClick={() => setEditingKuerzel(false)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Check className="size-3" />
+              </button>
+              <button
+                onClick={handleAutoGenerateKuerzel}
+                className="text-[11px] text-amber-dim/60 hover:text-amber transition-colors flex items-center gap-1"
+                title="Auto-generate from authors + year"
+              >
+                <RotateCcw className="size-3" /> Auto
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="bg-amber/10 text-amber px-2 py-0.5 rounded text-xs font-mono">
+                [{form.kuerzel}]
+              </span>
+              <button
+                onClick={() => setEditingKuerzel(true)}
+                className="text-muted-foreground/40 hover:text-amber transition-colors"
+              >
+                <Pencil className="size-3" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Source type dropdown */}
+      <div>
+        <label className="text-[11px] text-muted-foreground uppercase tracking-wider">
+          Quellentyp
+        </label>
+        <select
+          value={form.sourceType}
+          onChange={(e) => setField("sourceType", e.target.value as SourceType)}
+          className="mt-1 bg-transparent border border-border/30 rounded px-2 py-1.5 text-sm w-full"
+        >
+          {SOURCE_TYPE_OPTIONS.map((type) => (
+            <option key={type} value={type}>
+              {SOURCE_TYPE_LABELS[type]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* DOI metadata lookup button — only shown when a DOI exists */}
+      {doiIdentifier && (
+        <div>
+          <button
+            onClick={handleLookupMetadata}
+            disabled={lookupLoading}
+            className="bg-amber/10 text-amber hover:bg-amber/20 rounded px-3 py-1 text-[11px] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {lookupLoading ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <BookOpen className="size-3" />
+            )}
+            Metadaten laden
+          </button>
+          {lookupError && (
+            <p className="text-[11px] text-destructive mt-1">{lookupError}</p>
+          )}
+        </div>
+      )}
+
+      {/* Type-specific fields — all values are preserved when switching types */}
+
+      {/* Book fields: publisher, publisherLocation, edition */}
+      {form.sourceType === "book" && (
+        <>
+          <SourceField
+            label="Verlag"
+            value={form.publisher}
+            onChange={(v) => setField("publisher", v)}
+          />
+          <SourceField
+            label="Verlagsort"
+            value={form.publisherLocation}
+            onChange={(v) => setField("publisherLocation", v)}
+          />
+          <SourceField
+            label="Auflage"
+            value={form.edition}
+            onChange={(v) => setField("edition", v)}
+          />
+        </>
+      )}
+
+      {/* Book chapter fields: publisher, location, editors, book title, pages */}
+      {form.sourceType === "bookChapter" && (
+        <>
+          <SourceField
+            label="Verlag"
+            value={form.publisher}
+            onChange={(v) => setField("publisher", v)}
+          />
+          <SourceField
+            label="Verlagsort"
+            value={form.publisherLocation}
+            onChange={(v) => setField("publisherLocation", v)}
+          />
+          <SourceField
+            label="Herausgeber (kommagetrennt)"
+            value={form.editorNames}
+            onChange={(v) => setField("editorNames", v)}
+          />
+          <SourceField
+            label="Buchtitel (Sammelband)"
+            value={form.editorBookTitle}
+            onChange={(v) => setField("editorBookTitle", v)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <SourceField
+              label="Seite von"
+              value={form.pageStart}
+              onChange={(v) => setField("pageStart", v)}
+            />
+            <SourceField
+              label="Seite bis"
+              value={form.pageEnd}
+              onChange={(v) => setField("pageEnd", v)}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Journal article fields: journal name, volume, issue, pages */}
+      {form.sourceType === "journalArticle" && (
+        <>
+          <SourceField
+            label="Zeitschrift"
+            value={form.journalName}
+            onChange={(v) => setField("journalName", v)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <SourceField
+              label="Band (Volume)"
+              value={form.volume}
+              onChange={(v) => setField("volume", v)}
+            />
+            <SourceField
+              label="Ausgabe (Issue)"
+              value={form.issue}
+              onChange={(v) => setField("issue", v)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <SourceField
+              label="Seite von"
+              value={form.pageStart}
+              onChange={(v) => setField("pageStart", v)}
+            />
+            <SourceField
+              label="Seite bis"
+              value={form.pageEnd}
+              onChange={(v) => setField("pageEnd", v)}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Newspaper article fields: newspaper name, publish date */}
+      {form.sourceType === "newspaperArticle" && (
+        <>
+          <SourceField
+            label="Zeitung"
+            value={form.newspaperName}
+            onChange={(v) => setField("newspaperName", v)}
+          />
+          <SourceField
+            label="Erscheinungsdatum"
+            value={form.publishDate}
+            onChange={(v) => setField("publishDate", v)}
+          />
+        </>
+      )}
+
+      {/* Internet source fields: URL, access date */}
+      {form.sourceType === "internetSource" && (
+        <>
+          <SourceField
+            label="URL"
+            value={form.url}
+            onChange={(v) => setField("url", v)}
+          />
+          <SourceField
+            label="Zugriffsdatum"
+            value={form.accessDate}
+            onChange={(v) => setField("accessDate", v)}
+          />
+        </>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-amber/10 text-amber hover:bg-amber/20 rounded px-3 py-1 text-[11px] transition-colors disabled:opacity-50 flex items-center gap-1"
+        >
+          {saving ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+          Speichern
+        </button>
+        <button
+          onClick={() => setIsEditing(false)}
+          className="text-muted-foreground hover:text-foreground text-[11px] transition-colors flex items-center gap-1"
+        >
+          <X className="size-3" /> Abbrechen
+        </button>
+        {saveSuccess && (
+          <span className="text-[11px] text-sage">Gespeichert</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- SourceField helper ---
+
+/// Reusable labeled text input for source edit form fields.
+function SourceField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label className="text-[11px] text-muted-foreground uppercase tracking-wider">
+        {label}
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 bg-transparent border border-border/30 rounded px-2 py-1.5 text-sm w-full"
+      />
     </div>
   );
 }
@@ -638,6 +1482,14 @@ export default function PaperSummaryCard({
             </div>
           )}
         </div>
+
+        {/* Quellenangabe — unified paper metadata + bibliography source editing */}
+        <CollapsibleSection icon={BookOpen} label="Quellenangabe">
+          <PaperMetadataForm paperId={match.paperId} />
+          <div className="mt-3 pt-3 border-t border-border/10">
+            <SourceEditForm paperId={match.paperId} />
+          </div>
+        </CollapsibleSection>
       </div>
     </div>
   );

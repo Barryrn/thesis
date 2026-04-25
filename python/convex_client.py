@@ -186,6 +186,149 @@ def save_citation_matches(
     })
 
 
+# Fields that the Convex sources table accepts as optional kwargs
+_SOURCE_OPTIONAL_FIELDS = {
+    "publisher", "publisherLocation", "edition",
+    "journalName", "volume", "issue",
+    "pageStart", "pageEnd",
+    "url", "accessDate",
+    "newspaperName", "publishDate", "language",
+    "editorBookTitle",
+}
+
+
+def create_source(
+    paper_id: str,
+    source_type: str,
+    kuerzel: str,
+    kuerzel_manual_override: bool = False,
+    **kwargs,
+):
+    """Create a bibliography source record linked to a paper.
+
+    Convex uses the source record to generate HKA-style citations,
+    so we populate as many fields as possible from CrossRef/OpenAlex
+    metadata during processing to reduce manual data entry later.
+    """
+    args: dict = {
+        "paperId": paper_id,
+        "sourceType": source_type,
+        "kuerzel": kuerzel,
+        "kuerzelManualOverride": kuerzel_manual_override,
+    }
+
+    # Forward known optional fields from kwargs
+    for field in _SOURCE_OPTIONAL_FIELDS:
+        if field in kwargs and kwargs[field] is not None:
+            args[field] = kwargs[field]
+
+    # editorNames is an array and needs special handling
+    if "editorNames" in kwargs and kwargs["editorNames"] is not None:
+        args["editorNames"] = kwargs["editorNames"]
+
+    return _mutation("sources:createSource", args)
+
+
+def update_source(source_id: str, **fields):
+    """Update fields on an existing bibliography source record.
+
+    Accepts the Convex source document ID and any fields to patch.
+    Used by the /lookup-metadata flow when the user confirms enriched
+    metadata from CrossRef or OpenAlex.
+    """
+    args: dict = {"sourceId": source_id}
+
+    for field in _SOURCE_OPTIONAL_FIELDS:
+        if field in fields and fields[field] is not None:
+            args[field] = fields[field]
+
+    if "editorNames" in fields and fields["editorNames"] is not None:
+        args["editorNames"] = fields["editorNames"]
+    if "sourceType" in fields and fields["sourceType"] is not None:
+        args["sourceType"] = fields["sourceType"]
+    if "kuerzel" in fields and fields["kuerzel"] is not None:
+        args["kuerzel"] = fields["kuerzel"]
+
+    return _mutation("sources:updateSource", args)
+
+
+def upload_file(file_bytes: bytes, content_type: str = "application/pdf") -> tuple[str, str]:
+    """Upload a file to Convex storage and return (storageId, fileUrl).
+
+    Used by the Zotero import flow to store downloaded PDFs. Mirrors
+    the three-step process the frontend uses: generate URL → POST bytes
+    → resolve public file URL.
+    """
+    logger = get_logger()
+
+    # 1. Get a one-time upload URL from Convex
+    result = _mutation("papers:generateUploadUrl", {})
+    upload_url = result.get("value")
+    if not upload_url:
+        raise RuntimeError("Failed to obtain Convex upload URL")
+
+    # 2. POST the raw file bytes to the upload URL
+    res = httpx.post(
+        upload_url,
+        content=file_bytes,
+        headers={"Content-Type": content_type},
+        timeout=60,
+    )
+    res.raise_for_status()
+    storage_id = res.json().get("storageId")
+    if not storage_id:
+        raise RuntimeError("Convex upload did not return a storageId")
+
+    # 3. Resolve the public file URL
+    url_result = _query("papers:getFileUrl", {"storageId": storage_id})
+    file_url = url_result.get("value")
+    if not file_url:
+        raise RuntimeError(f"Failed to resolve file URL for storageId={storage_id}")
+
+    logger.info(
+        f"Uploaded {len(file_bytes)} bytes to Convex storage: storageId={storage_id}",
+        extra={"step": "upload_file"},
+    )
+    return storage_id, file_url
+
+
+def create_paper_from_zotero(
+    title: str,
+    authors: list[str],
+    year: int | None = None,
+    storage_id: str | None = None,
+    file_url: str | None = None,
+    file_name: str | None = None,
+    zotero_item_key: str | None = None,
+) -> str:
+    """Create a paper record from pre-filled Zotero metadata.
+
+    Returns the new paper's Convex document ID.
+    """
+    args: dict = {"title": title, "authors": authors}
+    if year is not None:
+        args["year"] = year
+    if storage_id is not None:
+        args["storageId"] = storage_id
+    if file_url is not None:
+        args["fileUrl"] = file_url
+    if file_name is not None:
+        args["fileName"] = file_name
+    if zotero_item_key is not None:
+        args["zoteroItemKey"] = zotero_item_key
+
+    result = _mutation("papers:createPaperFromZotero", args)
+    return result.get("value")
+
+
+def update_zotero_item_key(paper_id: str, zotero_item_key: str):
+    """Link a paper to a Zotero library item after upload-to-Zotero."""
+    return _mutation("papers:updateZoteroItemKey", {
+        "paperId": paper_id,
+        "zoteroItemKey": zotero_item_key,
+    })
+
+
 def save_matches_with_excerpts(
     paper_id: str,
     scored_sections: list[dict],
@@ -242,3 +385,24 @@ def save_matches_with_excerpts(
         })
 
     return result
+
+
+# ===== THESIS EXPORT =====
+
+
+def get_thesis_data() -> dict:
+    """Fetch all thesis data in a single batch query for export."""
+    result = _query("thesisExport:getThesisData", {})
+    return result.get("value", result) if isinstance(result, dict) else result
+
+
+def get_file_bytes(url: str) -> bytes:
+    """Download file bytes from a Convex storage URL."""
+    logger = get_logger()
+    try:
+        res = httpx.get(url, follow_redirects=True, timeout=30)
+        res.raise_for_status()
+        return res.content
+    except Exception as e:
+        logger.warning(f"Failed to download file from {url}: {e}")
+        return b""

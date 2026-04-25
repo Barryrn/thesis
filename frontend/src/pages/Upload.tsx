@@ -1,10 +1,12 @@
 import { Link, useLocation } from "react-router-dom";
-import { useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { PYTHON_SERVICE_URL } from "@/lib/config";
+import type { ZoteroCollection } from "@/lib/types";
 import {
   Table,
   TableBody,
@@ -15,7 +17,9 @@ import {
 } from "@/components/ui/table";
 import OutlineEditor from "@/components/OutlineEditor";
 import UploadZone from "@/components/UploadZone";
+import ZoteroImport from "@/components/ZoteroImport";
 import LanguageSelector from "@/components/LanguageSelector";
+import ProviderToggle from "@/components/ProviderToggle";
 import { PROCESSING_STEP_LABELS } from "@/lib/types";
 
 function StatusBadge({
@@ -52,9 +56,28 @@ export default function Upload() {
   const papers = useQuery(api.papers.listPapers) ?? [];
   const location = useLocation();
 
+  // Zotero collection picker state
+  const [zoteroCollections, setZoteroCollections] = useState<ZoteroCollection[]>([]);
+  const [selectedCollection, setSelectedCollection] = useState<string>("");
+
+  const fetchCollections = useCallback(async () => {
+    try {
+      const res = await fetch(`${PYTHON_SERVICE_URL}/zotero/collections`);
+      if (res.ok) {
+        const data = await res.json();
+        setZoteroCollections(data.collections ?? []);
+      }
+    } catch {
+      // Zotero not configured — picker stays empty
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCollections();
+  }, [fetchCollections]);
+
   useEffect(() => {
     if (location.hash) {
-      // Small delay to ensure the DOM has rendered
       const timer = setTimeout(() => {
         const el = document.querySelector(location.hash);
         el?.scrollIntoView({ behavior: "smooth" });
@@ -85,9 +108,34 @@ export default function Upload() {
         <section id="upload">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">Upload Papers</h2>
-            <LanguageSelector />
+            <div className="flex items-center gap-2">
+              {zoteroCollections.length > 0 && (
+                <select
+                  value={selectedCollection}
+                  onChange={(e) => setSelectedCollection(e.target.value)}
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  title="Zotero collection for uploaded papers"
+                >
+                  <option value="">Zotero: No collection</option>
+                  {zoteroCollections.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      Zotero: {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <ProviderToggle />
+              <LanguageSelector />
+            </div>
           </div>
-          <UploadZone />
+          <UploadZone zoteroCollection={selectedCollection || undefined} />
+        </section>
+
+        <Separator />
+
+        <section id="zotero">
+          <h2 className="text-xl font-semibold mb-4">Import from Zotero</h2>
+          <ZoteroImport />
         </section>
 
         <Separator />

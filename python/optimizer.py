@@ -4,18 +4,8 @@ Provides four modes — enhance, formalize, simplify, expand — that rewrite
 selected text while preserving [REFN] citation placeholders.
 """
 
-import os
-import time
-
-from dotenv import load_dotenv
-from openai import OpenAI
-
-from pipeline_logger import get_logger, log_openai_call, log_openai_response
-
-load_dotenv()
-
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-MODEL = "gpt-4o"
+from ai_client import chat_completion
+from pipeline_logger import get_logger
 
 VALID_MODES = {"enhance", "formalize", "simplify", "expand"}
 
@@ -70,6 +60,7 @@ def optimize(
     context_before: str = "",
     context_after: str = "",
     language: str = "en",
+    provider: str = "openai",
 ) -> str:
     """Optimize text using the specified mode.
 
@@ -103,26 +94,13 @@ def optimize(
     parts.append("Return ONLY the optimized text. No explanations, no quotes, no markdown.")
     user_message = "\n\n".join(parts)
 
-    log_openai_call(MODEL, 2048, len(user_message))
-
-    t0 = time.monotonic()
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=2048,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-        )
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=True)
-    except Exception as e:
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=False, error=str(e))
-        raise
-
-    result = response.choices[0].message.content.strip()
+    result = chat_completion(
+        provider=provider,
+        module="optimizer",
+        system=system_prompt,
+        user_message=user_message,
+        max_tokens=2048,
+    )
     logger.info(
         f"Optimize ({mode}): input={len(text)} chars, output={len(result)} chars",
         extra={"step": "optimize", "mode": mode},

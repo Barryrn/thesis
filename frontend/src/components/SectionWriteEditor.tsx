@@ -1,21 +1,33 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X } from "lucide-react";
+import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma } from "lucide-react";
 import CitationPicker from "./CitationPicker";
+import FormulaPreviewPanel from "./FormulaPreviewPanel";
+import FigurePanel from "./FigurePanel";
 import {
   extractCitationIds,
   insertCitationMarker,
   getAtTriggerContext,
-  getCaretCoordinates,
-  renderCitationsApa,
-  renderCitationsIeee,
-  buildIeeeOrderMap,
-  buildCitationLabel,
+  buildFootnotes,
+  renderFootnoteText,
 } from "@/lib/citationUtils";
+import { extractFormulasForPreview, insertFormulaMarker } from "@/lib/formulaUtils";
+import { insertFigureMarker } from "@/lib/figureUtils";
+import {
+  rawTextToDecoratedHtml,
+  decoratedDomToRawText,
+  getCaretOffsetInRawText,
+  setCaretFromRawTextOffset,
+  getCaretPixelPosition,
+  getSelectionRangeInRawText,
+} from "@/lib/contentEditableUtils";
 import { useTextOptimize } from "@/hooks/useTextOptimize";
 import { useLanguage } from "@/lib/LanguageContext";
-import type { ActiveSection, CitationStyle, OptimizeMode } from "@/lib/types";
+import { useProvider } from "@/lib/ProviderContext";
+import type { ActiveSection, CitationType, OptimizeMode } from "@/lib/types";
+import "katex/dist/katex.min.css";
+import type { Doc } from "../../convex/_generated/dataModel";
 
 /// Debounce delay in ms before auto-saving content.
 const SAVE_DEBOUNCE_MS = 1500;
@@ -24,9 +36,10 @@ interface SectionWriteEditorProps {
   activeSection: ActiveSection;
 }
 
-/// Main write-mode editor for composing thesis text with inline citations.
-/// Provides a plain textarea with @-triggered citation picker, debounced
-/// auto-save to Convex, and a preview pane with configurable citation style.
+/// Main write-mode editor for composing thesis text with HKA-style footnote
+/// citations. Uses a contentEditable div that renders citation markers as
+/// superscript numbers inline, with @-triggered citation picker, debounced
+/// auto-save to Convex, and a footnote panel below the editor.
 export default function SectionWriteEditor({
   activeSection,
 }: SectionWriteEditorProps) {
@@ -43,8 +56,6 @@ export default function SectionWriteEditor({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle"
   );
-  const [citationStyle, setCitationStyle] = useState<CitationStyle>("apa");
-  const [showPreview, setShowPreview] = useState(false);
 
   // Text selection state for optimize toolbar
   const [selection, setSelection] = useState<{
@@ -54,6 +65,7 @@ export default function SectionWriteEditor({
 
   // Language context for AI optimization
   const { language } = useLanguage();
+  const { provider } = useProvider();
 
   // AI text optimization hook
   const {
@@ -61,7 +73,7 @@ export default function SectionWriteEditor({
     requestOptimize,
     acceptOptimize,
     discardOptimize,
-  } = useTextOptimize(body, language);
+  } = useTextOptimize(body, language, provider);
 
   // Citation picker state
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -70,7 +82,7 @@ export default function SectionWriteEditor({
   const [pickerAnchor, setPickerAnchor] = useState({ top: 0, left: 0 });
 
   // Refs
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /// Tracks the sectionId at save-invocation time to prevent cross-section writes.
   const sectionIdRef = useRef(sectionId);
@@ -78,17 +90,73 @@ export default function SectionWriteEditor({
   /// when the reactive query pushes back the server version.
   const lastSavedBodyRef = useRef<string | null>(null);
   const initializedRef = useRef(false);
+  /// Tracks latest body for cleanup/flush on unmount.
+  const bodyRef = useRef(body);
+  /// Tracks the last body rendered into the contentEditable div to avoid
+  /// re-rendering on every keystroke (only re-render when markers change).
+  const lastRenderedBodyRef = useRef("");
+  /// Suppresses re-render during IME composition (e.g. Chinese/Japanese input).
+  const composingRef = useRef(false);
+  /// Suppresses external re-render while the user is actively typing.
+  const isTypingRef = useRef(false);
 
-  // Keep sectionId ref current
+  // Keep refs current
   useEffect(() => {
     sectionIdRef.current = sectionId;
   }, [sectionId]);
+  useEffect(() => {
+    bodyRef.current = body;
+  }, [body]);
+
+  // ── Source queries for footnote rendering ─────────────────────────────
+  /// Build a source map from cited paper IDs for footnote generation.
+  const citedPaperIds = useMemo(() => extractCitationIds(body), [body]);
+
+  // Query sources for all cited papers — we need their Kürzel for footnotes.
+  // Note: Convex queries are reactive, so this updates automatically.
+  const allSources = useQuery(api.sources.listAllSources) ?? [];
+  const createSource = useMutation(api.sources.createSource);
+
+  const sourceMap = useMemo(() => {
+    const map = new Map<string, Doc<"sources">>();
+    for (const source of allSources) {
+      map.set(source.paperId, source);
+    }
+    return map;
+  }, [allSources]);
+
+  /// Auto-create source records for cited papers that don't have one yet.
+  /// Handles papers uploaded before the sources table was added.
+  const autoCreatedRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const id of citedPaperIds) {
+      if (!sourceMap.has(id) && !autoCreatedRef.current.has(id)) {
+        autoCreatedRef.current.add(id);
+        createSource({ paperId: id as any, sourceType: "book" }).catch(() => {
+          // Ignore — may already exist from another auto-create
+        });
+      }
+    }
+  }, [citedPaperIds, sourceMap, createSource]);
+
+  /// Footnote entries generated from current body text and source data.
+  const footnotes = useMemo(
+    () => buildFootnotes(body, sourceMap),
+    [body, sourceMap]
+  );
+
+  /// Formula preview entries extracted from body text.
+  const formulaEntries = useMemo(
+    () => extractFormulasForPreview(body),
+    [body]
+  );
 
   // ── Sync from server on mount / section switch ────────────────────────
   useEffect(() => {
     // Reset on section change
     initializedRef.current = false;
     lastSavedBodyRef.current = null;
+    lastRenderedBodyRef.current = "";
     setSaveStatus("idle");
     setPickerOpen(false);
   }, [sectionId]);
@@ -102,6 +170,20 @@ export default function SectionWriteEditor({
       initializedRef.current = true;
     }
   }, [content]);
+
+  // ── Render body into contentEditable when body changes externally ─────
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    // Skip re-render if the user is actively typing or composing IME
+    if (isTypingRef.current || composingRef.current) return;
+    // Only re-render if the body actually changed from what's displayed
+    if (body === lastRenderedBodyRef.current) return;
+
+    const html = rawTextToDecoratedHtml(body, sourceMap);
+    editor.innerHTML = html;
+    lastRenderedBodyRef.current = body;
+  }, [body, sourceMap]);
 
   // ── Debounced auto-save ───────────────────────────────────────────────
   const flushSave = useCallback(
@@ -155,72 +237,83 @@ export default function SectionWriteEditor({
         saveTimerRef.current = null;
       }
       // Flush immediately with captured values
-      const currentBody = textareaRef.current?.value;
+      const currentBody = bodyRef.current;
       const targetId = sectionIdRef.current;
-      if (
-        currentBody !== undefined &&
-        currentBody !== lastSavedBodyRef.current
-      ) {
+      if (currentBody !== lastSavedBodyRef.current) {
         flushSave(currentBody, targetId);
       }
     };
   }, [sectionId, flushSave]);
 
-  // ── Text change handler ───────────────────────────────────────────────
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newBody = e.target.value;
-      setBody(newBody);
-      scheduleSave(newBody);
+  // ── ContentEditable input handler ─────────────────────────────────────
+  /// Extracts raw text from the contentEditable DOM on every input event,
+  /// updates body state, and checks for @-trigger.
+  const handleInput = useCallback(() => {
+    if (composingRef.current) return; // Don't process during IME composition
 
-      // Check for @ trigger
-      const cursorPos = e.target.selectionStart;
-      const ctx = getAtTriggerContext(newBody, cursorPos);
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    isTypingRef.current = true;
+    const newRawText = decoratedDomToRawText(editor);
+    setBody(newRawText);
+    lastRenderedBodyRef.current = newRawText;
+    scheduleSave(newRawText);
+
+    // Check for @ trigger
+    const cursorPos = getCaretOffsetInRawText(editor);
+    if (cursorPos >= 0) {
+      const ctx = getAtTriggerContext(newRawText, cursorPos);
       if (ctx) {
         setPickerQuery(ctx.query);
         setPickerStartPos(ctx.startPos);
         if (!pickerOpen) {
-          // Compute anchor position for the picker dropdown
-          const coords = getCaretCoordinates(e.target, ctx.startPos);
+          const coords = getCaretPixelPosition(editor);
           setPickerAnchor(coords);
           setPickerOpen(true);
         }
       } else {
         setPickerOpen(false);
       }
-    },
-    [scheduleSave, pickerOpen]
-  );
+    }
 
-  // Also check @ trigger on cursor movement (click / arrow keys),
-  // and track the current text selection for the optimize toolbar.
+    // Reset typing flag after React has had time to process the state update.
+    // Using setTimeout ensures the re-render effect (which checks isTypingRef)
+    // doesn't fight with the user's input during the same frame.
+    setTimeout(() => {
+      isTypingRef.current = false;
+    }, 50);
+  }, [scheduleSave, pickerOpen]);
+
+  // ── Selection tracking (click / arrow keys) ───────────────────────────
   const handleSelect = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const cursorPos = textarea.selectionStart;
-    const ctx = getAtTriggerContext(body, cursorPos);
-    if (ctx) {
-      setPickerQuery(ctx.query);
-      setPickerStartPos(ctx.startPos);
-      if (!pickerOpen) {
-        const coords = getCaretCoordinates(textarea, ctx.startPos);
-        setPickerAnchor(coords);
-        setPickerOpen(true);
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const cursorPos = getCaretOffsetInRawText(editor);
+    if (cursorPos >= 0) {
+      const ctx = getAtTriggerContext(body, cursorPos);
+      if (ctx) {
+        setPickerQuery(ctx.query);
+        setPickerStartPos(ctx.startPos);
+        if (!pickerOpen) {
+          const coords = getCaretPixelPosition(editor);
+          setPickerAnchor(coords);
+          setPickerOpen(true);
+        }
+      } else {
+        setPickerOpen(false);
       }
-    } else {
-      setPickerOpen(false);
     }
 
     // Track selection for optimize buttons (only when not in a preview state).
-    // Use functional updaters to avoid re-renders when range hasn't changed.
     if (optimizeState.status === "idle") {
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      if (start !== end) {
+      const range = getSelectionRangeInRawText(editor);
+      if (range) {
         setSelection((prev) =>
-          prev && prev.start === start && prev.end === end
+          prev && prev.start === range.start && prev.end === range.end
             ? prev
-            : { start, end }
+            : range
         );
       } else {
         setSelection((prev) => (prev === null ? prev : null));
@@ -228,37 +321,67 @@ export default function SectionWriteEditor({
     }
   }, [body, pickerOpen, optimizeState.status]);
 
-  // ── Citation selection ────────────────────────────────────────────────
-  const handleCitationSelect = useCallback(
-    (paperId: string, label: string) => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
+  // ── Helper: re-render editor HTML and restore caret ───────────────────
+  const rerenderEditor = useCallback(
+    (newBody: string, caretOffset: number) => {
+      const editor = editorRef.current;
+      if (!editor) return;
 
-      const cursorPos = textarea.selectionStart;
+      const html = rawTextToDecoratedHtml(newBody, sourceMap);
+      editor.innerHTML = html;
+      lastRenderedBodyRef.current = newBody;
+
+      requestAnimationFrame(() => {
+        // Re-read ref in case the component unmounted during the RAF delay
+        const el = editorRef.current;
+        if (!el) return;
+        el.focus();
+        try {
+          setCaretFromRawTextOffset(el, Math.min(caretOffset, newBody.length));
+        } catch {
+          // Fallback: place caret at end
+        }
+      });
+    },
+    [sourceMap]
+  );
+
+  // ── Citation selection ────────────────────────────────────────────────
+  /// Handles the completed citation picker flow: paper + type + page ref.
+  const handleCitationSelect = useCallback(
+    (
+      paperId: string,
+      citationType: CitationType,
+      pageRef: string,
+      secondaryPaperId?: string,
+      secondaryPageRef?: string
+    ) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      const cursorPos = getCaretOffsetInRawText(editor);
       const { newBody, newCursorPos } = insertCitationMarker(
         body,
         pickerStartPos,
-        cursorPos,
+        cursorPos >= 0 ? cursorPos : body.length,
         paperId,
-        label
+        citationType,
+        pageRef,
+        secondaryPaperId,
+        secondaryPageRef
       );
 
       setBody(newBody);
       setPickerOpen(false);
       scheduleSave(newBody);
-
-      // Restore focus and cursor position
-      requestAnimationFrame(() => {
-        textarea.focus();
-        textarea.setSelectionRange(newCursorPos, newCursorPos);
-      });
+      rerenderEditor(newBody, newCursorPos);
     },
-    [body, pickerStartPos, scheduleSave]
+    [body, pickerStartPos, scheduleSave, rerenderEditor]
   );
 
   // Handle keyboard events for picker navigation
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (!pickerOpen) return;
       if (e.key === "Escape") {
         e.preventDefault();
@@ -272,23 +395,50 @@ export default function SectionWriteEditor({
     [pickerOpen]
   );
 
-  // ── Preview rendering ─────────────────────────────────────────────────
-  const paperMap = useMemo(() => {
-    const map = new Map<string, { authors: string[]; year?: number }>();
-    for (const m of matches) {
-      map.set(m.paperId, { authors: m.authors, year: m.year });
-    }
-    return map;
-  }, [matches]);
+  // ── Paste handler — strip HTML, insert plain text only ────────────────
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const text = e.clipboardData.getData("text/plain");
+      if (!text) return;
 
-  const previewText = useMemo(() => {
-    if (!showPreview) return "";
-    if (citationStyle === "apa") {
-      return renderCitationsApa(body, paperMap);
-    }
-    const orderMap = buildIeeeOrderMap(body);
-    return renderCitationsIeee(body, orderMap);
-  }, [body, citationStyle, paperMap, showPreview]);
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      // Replace selected text (if any) or insert at caret position
+      const selRange = getSelectionRangeInRawText(editor);
+      let start: number;
+      let end: number;
+      if (selRange) {
+        start = selRange.start;
+        end = selRange.end;
+      } else {
+        const cursorPos = getCaretOffsetInRawText(editor);
+        start = cursorPos >= 0 ? cursorPos : body.length;
+        end = start;
+      }
+      const before = body.slice(0, start);
+      const after = body.slice(end);
+      const newBody = before + text + after;
+      const newCursorPos = start + text.length;
+
+      setBody(newBody);
+      scheduleSave(newBody);
+      rerenderEditor(newBody, newCursorPos);
+    },
+    [body, scheduleSave, rerenderEditor]
+  );
+
+  // ── IME composition handlers ──────────────────────────────────────────
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(() => {
+    composingRef.current = false;
+    // Process the input now that composition is complete
+    handleInput();
+  }, [handleInput]);
 
   // ── Optimize mode config ────────────────────────────────────────────
   const optimizeModes: {
@@ -309,7 +459,9 @@ export default function SectionWriteEditor({
     setBody(newBody);
     scheduleSave(newBody);
     setSelection(null);
-  }, [acceptOptimize, scheduleSave]);
+    // Force re-render of the contentEditable with the new body
+    rerenderEditor(newBody, newBody.length);
+  }, [acceptOptimize, scheduleSave, rerenderEditor]);
 
   /// Handles discarding the optimize preview.
   const handleDiscardOptimize = useCallback(() => {
@@ -317,28 +469,62 @@ export default function SectionWriteEditor({
     setSelection(null);
   }, [discardOptimize]);
 
+  /// Inserts a display formula template ($$  $$) at the current cursor position.
+  const handleInsertFormula = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const cursorPos = getCaretOffsetInRawText(editor);
+    const pos = cursorPos >= 0 ? cursorPos : body.length;
+    const { newBody, newCursorPos } = insertFormulaMarker(
+      body, pos, "  ", true
+    );
+    setBody(newBody);
+    scheduleSave(newBody);
+
+    // Place cursor between the $$ delimiters (on the space)
+    const innerPos = newCursorPos - 3;
+    rerenderEditor(newBody, innerPos);
+  }, [body, scheduleSave, rerenderEditor]);
+
+  /// Inserts a figure marker at the current cursor position.
+  const handleInsertFigureMarker = useCallback(
+    (figureId: string) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      const cursorPos = getCaretOffsetInRawText(editor);
+      const pos = cursorPos >= 0 ? cursorPos : body.length;
+      const { newBody, newCursorPos } = insertFigureMarker(
+        body, pos, figureId
+      );
+      setBody(newBody);
+      scheduleSave(newBody);
+      rerenderEditor(newBody, newCursorPos);
+    },
+    [body, scheduleSave, rerenderEditor]
+  );
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          Type <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">@</kbd> to
-          insert a citation
-        </p>
         <div className="flex items-center gap-3">
-          {/* Preview toggle */}
+          <p className="text-xs text-muted-foreground">
+            Type <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">@</kbd> to
+            insert a footnote citation
+          </p>
           <button
-            onClick={() => setShowPreview(!showPreview)}
-            className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
-              showPreview
-                ? "bg-amber/10 text-amber"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            onClick={handleInsertFormula}
+            className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors flex items-center gap-1"
+            title="Insert formula (LaTeX)"
           >
-            Preview
+            <Sigma className="size-3" />
+            Formula
           </button>
-
+        </div>
+        <div className="flex items-center gap-3">
           {/* Save status */}
           <span className="text-[11px] text-muted-foreground flex items-center gap-1">
             {saveStatus === "saving" && (
@@ -436,19 +622,24 @@ export default function SectionWriteEditor({
         </div>
       )}
 
-      {/* Editor area */}
+      {/* Editor area — contentEditable div with inline citation rendering */}
       <div className="relative">
-        <textarea
-          ref={textareaRef}
-          value={body}
-          onChange={handleChange}
-          onSelect={handleSelect}
+        <div
+          ref={editorRef}
+          contentEditable={optimizeState.status === "idle"}
+          onInput={handleInput}
           onKeyDown={handleKeyDown}
-          readOnly={optimizeState.status !== "idle"}
-          placeholder="Start writing your thesis text here..."
-          className={`w-full min-h-[400px] bg-transparent text-foreground/90 text-sm leading-relaxed resize-y rounded-lg border border-border/30 p-4 focus:outline-none focus:border-amber/30 transition-colors placeholder:text-muted-foreground/40 font-[inherit] ${
+          onMouseUp={handleSelect}
+          onKeyUp={handleSelect}
+          onPaste={handlePaste}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          data-placeholder="Start writing your thesis text here..."
+          suppressContentEditableWarning
+          className={`w-full min-h-[400px] bg-transparent text-foreground/90 text-sm leading-relaxed rounded-lg border border-border/30 p-4 focus:outline-none focus:border-amber/30 transition-colors ${
             optimizeState.status !== "idle" ? "opacity-50" : ""
           }`}
+          style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}
         />
 
         {/* Citation picker dropdown */}
@@ -463,45 +654,35 @@ export default function SectionWriteEditor({
         )}
       </div>
 
-      {/* Preview pane */}
-      {showPreview && (
+      {/* Formula preview panel — shows rendered KaTeX for formulas in the body */}
+      {formulaEntries.length > 0 && (
+        <FormulaPreviewPanel formulas={formulaEntries} />
+      )}
+
+      {/* Figure panel — upload, manage, and insert figure markers */}
+      <FigurePanel
+        sectionId={sectionId}
+        body={body}
+        onInsertMarker={handleInsertFigureMarker}
+      />
+
+      {/* Footnote panel — shows HKA-style footnotes for citations in the body */}
+      {footnotes.length > 0 && (
         <div className="rounded-lg border border-border/30 p-4 bg-muted/10">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-medium text-amber-dim uppercase tracking-wider">
-              Preview
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCitationStyle("apa")}
-                className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
-                  citationStyle === "apa"
-                    ? "bg-amber/10 text-amber"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+          <span className="text-[11px] font-medium text-amber-dim uppercase tracking-wider">
+            Fußnoten
+          </span>
+          <ol className="mt-2 space-y-1 list-none">
+            {footnotes.map((fn) => (
+              <li
+                key={fn.number}
+                className="text-sm text-foreground/80 leading-relaxed"
               >
-                APA
-              </button>
-              <button
-                onClick={() => setCitationStyle("ieee")}
-                className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
-                  citationStyle === "ieee"
-                    ? "bg-amber/10 text-amber"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                IEEE
-              </button>
-            </div>
-          </div>
-          {previewText ? (
-            <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-              {previewText}
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground/50 italic">
-              No content to preview yet.
-            </p>
-          )}
+                <sup className="text-amber/70 mr-1">{fn.number}</sup>
+                {renderFootnoteText(fn)}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
     </div>

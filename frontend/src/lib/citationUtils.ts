@@ -1,18 +1,81 @@
-import type { PaperId } from "./types";
+import type { CitationType, FootnoteEntry, ParsedCitation } from "./types";
+import type { Doc } from "../../convex/_generated/dataModel";
 
-/// Regex matching {{cite:PAPER_ID::Label}} markers in body text.
-const CITE_REGEX = /\{\{cite:([^:]+)::([^}]+)\}\}/g;
+// ── Regex patterns for HKA footnote citation markers ───────────────────
 
-/// Extracts unique paper IDs from all citation markers in the body.
-export function extractCitationIds(body: string): PaperId[] {
-  const ids = new Set<string>();
-  let match;
-  const re = new RegExp(CITE_REGEX.source, "g");
+/// Primary citation: {{cite:PAPER_ID::direct|indirect::PAGE_REF}}
+const CITE_REGEX =
+  /\{\{cite:([^:]+)::(direct|indirect)::([^}]+)\}\}/g;
+
+/// Secondary source: {{cite:PAPER_ID::direct|indirect::PAGE_REF::via:SEC_ID::SEC_PAGE}}
+const CITE_SECONDARY_REGEX =
+  /\{\{cite:([^:]+)::(direct|indirect)::([^:]+)::via:([^:]+)::([^}]+)\}\}/g;
+
+/// Combined regex matching both primary and secondary markers.
+/// Group layout differs by branch, so we parse with `parseCitations` instead.
+const CITE_ANY_REGEX =
+  /\{\{cite:[^}]+\}\}/g;
+
+// ── Parsing ────────────────────────────────────────────────────────────
+
+/// Parses all citation markers from body text in order of appearance.
+export function parseCitations(body: string): ParsedCitation[] {
+  const results: ParsedCitation[] = [];
+  let match: RegExpExecArray | null;
+  const re = new RegExp(CITE_ANY_REGEX.source, "g");
+
   while ((match = re.exec(body)) !== null) {
-    ids.add(match[1]);
+    const full = match[0];
+    const parsed = parseSingleMarker(full);
+    if (parsed) results.push(parsed);
   }
-  return [...ids] as PaperId[];
+
+  return results;
 }
+
+/// Parses a single {{cite:...}} marker string into structured data.
+function parseSingleMarker(marker: string): ParsedCitation | null {
+  // Try secondary format first (it's more specific)
+  const secRe = new RegExp(CITE_SECONDARY_REGEX.source);
+  const secMatch = secRe.exec(marker);
+  if (secMatch) {
+    return {
+      fullMatch: marker,
+      paperId: secMatch[1],
+      citationType: secMatch[2] as CitationType,
+      pageRef: secMatch[3],
+      secondaryPaperId: secMatch[4],
+      secondaryPageRef: secMatch[5],
+    };
+  }
+
+  // Try primary format
+  const priRe = new RegExp(CITE_REGEX.source);
+  const priMatch = priRe.exec(marker);
+  if (priMatch) {
+    return {
+      fullMatch: marker,
+      paperId: priMatch[1],
+      citationType: priMatch[2] as CitationType,
+      pageRef: priMatch[3],
+    };
+  }
+
+  return null;
+}
+
+/// Extracts unique paper IDs from all citation markers in the body,
+/// including secondary source paper IDs.
+export function extractCitationIds(body: string): string[] {
+  const ids = new Set<string>();
+  for (const c of parseCitations(body)) {
+    ids.add(c.paperId);
+    if (c.secondaryPaperId) ids.add(c.secondaryPaperId);
+  }
+  return [...ids];
+}
+
+// ── Marker insertion ───────────────────────────────────────────────────
 
 /// Replaces the @query text at cursorPos with a citation marker.
 /// Returns the updated body string and new cursor position.
@@ -21,64 +84,201 @@ export function insertCitationMarker(
   atStartPos: number,
   cursorPos: number,
   paperId: string,
-  label: string
+  citationType: CitationType,
+  pageRef: string,
+  secondaryPaperId?: string,
+  secondaryPageRef?: string
 ): { newBody: string; newCursorPos: number } {
-  const marker = `{{cite:${paperId}::${label}}}`;
+  let marker: string;
+
+  if (secondaryPaperId && secondaryPageRef) {
+    marker = `{{cite:${paperId}::${citationType}::${pageRef}::via:${secondaryPaperId}::${secondaryPageRef}}}`;
+  } else {
+    marker = `{{cite:${paperId}::${citationType}::${pageRef}}}`;
+  }
+
   const before = body.slice(0, atStartPos);
   const after = body.slice(cursorPos);
   const newBody = before + marker + after;
   return { newBody, newCursorPos: before.length + marker.length };
 }
 
-/// Replaces citation markers with APA-style (Author, Year) text.
-export function renderCitationsApa(
+// ── Footnote rendering ─────────────────────────────────────────────────
+
+/// Builds numbered footnote entries from body text and a source lookup map.
+/// Each unique citation marker gets a sequential footnote number.
+export function buildFootnotes(
   body: string,
-  paperMap: Map<string, { authors: string[]; year?: number }>
-): string {
-  return body.replace(
-    new RegExp(CITE_REGEX.source, "g"),
-    (_match, paperId: string, fallbackLabel: string) => {
-      const paper = paperMap.get(paperId);
-      if (!paper) return `(${fallbackLabel})`;
+  sourceMap: Map<string, Doc<"sources">>
+): FootnoteEntry[] {
+  const citations = parseCitations(body);
+  const footnotes: FootnoteEntry[] = [];
+  let number = 1;
 
-      const authorPart = formatAuthorsApa(paper.authors);
-      const yearPart = paper.year ? `, ${paper.year}` : "";
-      return `(${authorPart}${yearPart})`;
-    }
-  );
-}
+  for (const c of citations) {
+    const source = sourceMap.get(c.paperId);
+    const kuerzel = source?.kuerzel ?? "??";
 
-/// Replaces citation markers with IEEE-style [N] references.
-/// orderMap maps paperId to its sequential citation number.
-export function renderCitationsIeee(
-  body: string,
-  orderMap: Map<string, number>
-): string {
-  return body.replace(
-    new RegExp(CITE_REGEX.source, "g"),
-    (_match, paperId: string, fallbackLabel: string) => {
-      const num = orderMap.get(paperId);
-      if (num === undefined) return `[${fallbackLabel}]`;
-      return `[${num}]`;
-    }
-  );
-}
+    const entry: FootnoteEntry = {
+      number: number++,
+      kuerzel,
+      pageRef: c.pageRef,
+      citationType: c.citationType,
+      paperId: c.paperId,
+    };
 
-/// Builds an IEEE citation order map from body text.
-/// Papers are numbered in the order they first appear.
-export function buildIeeeOrderMap(body: string): Map<string, number> {
-  const order = new Map<string, number>();
-  let counter = 1;
-  let match;
-  const re = new RegExp(CITE_REGEX.source, "g");
-  while ((match = re.exec(body)) !== null) {
-    const paperId = match[1];
-    if (!order.has(paperId)) {
-      order.set(paperId, counter++);
+    if (c.secondaryPaperId) {
+      const secSource = sourceMap.get(c.secondaryPaperId);
+      entry.secondaryKuerzel = secSource?.kuerzel ?? "??";
+      entry.secondaryPageRef = c.secondaryPageRef;
     }
+
+    footnotes.push(entry);
   }
-  return order;
+
+  return footnotes;
 }
+
+/// Formats a single footnote entry as text per HKA rules.
+/// Direct: "KR09, S. 141."
+/// Indirect: "Vgl. KR09, S. 3."
+/// Secondary: "BE94, S. 185 zitiert nach FR11, S. 149."
+export function renderFootnoteText(entry: FootnoteEntry): string {
+  const prefix = entry.citationType === "indirect" ? "Vgl. " : "";
+
+  if (entry.secondaryKuerzel && entry.secondaryPageRef) {
+    return `${prefix}${entry.kuerzel}, ${entry.pageRef} zitiert nach ${entry.secondaryKuerzel}, ${entry.secondaryPageRef}.`;
+  }
+
+  return `${prefix}${entry.kuerzel}, ${entry.pageRef}.`;
+}
+
+// ── Kürzel generation ──────────────────────────────────────────────────
+
+/// Extracts the surname (last word) from a full name string.
+export function extractSurname(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  return parts[parts.length - 1];
+}
+
+/// Strips diacritics/umlauts for ASCII-safe Kürzel characters.
+function normalizeForKuerzel(str: string): string {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/// Client-side Kürzel generation (mirrors backend logic for preview).
+/// Does NOT handle collision detection — that's the backend's job.
+export function generateKuerzel(authors: string[], year?: number): string {
+  if (authors.length === 0) return "XX" + (year ? String(year).slice(-2) : "");
+
+  const surnames = authors.map((a) => normalizeForKuerzel(extractSurname(a)));
+  let prefix: string;
+
+  if (surnames.length === 1) {
+    prefix = surnames[0].slice(0, 2).toUpperCase();
+  } else {
+    prefix = (surnames[0][0] + surnames[1][0]).toUpperCase();
+  }
+
+  const yearSuffix = year ? String(year).slice(-2) : "";
+  return prefix + yearSuffix;
+}
+
+// ── Bibliography formatting ────────────────────────────────────────────
+
+/// Formats a single bibliography entry per HKA rules based on sourceType.
+/// Each entry is prefixed with [Kürzel] and follows the type-specific format.
+export function formatBibliographyEntry(
+  source: Doc<"sources">,
+  paper: { title: string; authors: string[]; year?: number }
+): string {
+  const kuerzel = `[${source.kuerzel}]`;
+  const authorStr = formatAuthorsForBibliography(paper.authors);
+  const yearStr = paper.year ? `(${paper.year})` : "(o.J.)";
+  const title = paper.title;
+
+  switch (source.sourceType) {
+    case "book":
+      return `${kuerzel} ${authorStr} ${yearStr}. ${title}. ${locationPublisher(source)}`;
+
+    case "bookChapter": {
+      const editors = source.editorNames?.length
+        ? formatAuthorsForBibliography(source.editorNames)
+        : "";
+      const bookTitle = source.editorBookTitle ?? "";
+      const pages = formatPages(source.pageStart, source.pageEnd);
+      return `${kuerzel} ${authorStr} ${yearStr}. ${title}. In ${editors} (Hrsg.), ${bookTitle}. ${locationPublisher(source)}${pages}`;
+    }
+
+    case "journalArticle": {
+      const journal = source.journalName ?? "";
+      const vol = source.volume ? `Jahrgang ${source.volume}` : "";
+      const iss = source.issue ? `, Heft ${source.issue}` : "";
+      const pages = formatPages(source.pageStart, source.pageEnd);
+      return `${kuerzel} ${authorStr} ${yearStr}. ${title}. ${journal}. ${vol}${iss}.${pages}`;
+    }
+
+    case "newspaperArticle": {
+      const newspaper = source.newspaperName ?? "";
+      const pubDate = source.publishDate
+        ? `Ausgabe vom ${source.publishDate}`
+        : "";
+      const pages = formatPages(source.pageStart, source.pageEnd);
+      return `${kuerzel} ${authorStr} ${yearStr}. ${title}. ${newspaper}. ${pubDate}.${pages}`;
+    }
+
+    case "internetSource": {
+      const accessStr = source.accessDate
+        ? `Abgerufen am ${source.accessDate}`
+        : "";
+      const urlStr = source.url ? `von ${source.url}` : "";
+      return `${kuerzel} ${authorStr} ${yearStr}. ${title}. ${accessStr} ${urlStr}.`;
+    }
+
+    default:
+      return `${kuerzel} ${authorStr} ${yearStr}. ${title}.`;
+  }
+}
+
+/// Formats an author list for bibliography entries.
+/// "Nachname, Initial." for first author, "und Nachname, Initial." for second.
+function formatAuthorsForBibliography(authors: string[]): string {
+  if (authors.length === 0) return "Unbekannt";
+
+  const formatted = authors.map((a) => {
+    const parts = a.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    const surname = parts[parts.length - 1];
+    const initials = parts
+      .slice(0, -1)
+      .map((p) => p[0] + ".")
+      .join(" ");
+    return `${surname}, ${initials}`;
+  });
+
+  if (formatted.length === 1) return formatted[0];
+  if (formatted.length === 2) return `${formatted[0]} und ${formatted[1]}`;
+  return formatted.slice(0, -1).join(", ") + " und " + formatted[formatted.length - 1];
+}
+
+/// Formats publisher location and name.
+function locationPublisher(source: Doc<"sources">): string {
+  const loc = source.publisherLocation ?? "";
+  const pub = source.publisher ?? "";
+  if (loc && pub) return `${loc}: ${pub}.`;
+  if (pub) return `${pub}.`;
+  if (loc) return `${loc}.`;
+  return "";
+}
+
+/// Formats page range as " S. X-Y." or " S. X." or empty.
+function formatPages(pageStart?: string, pageEnd?: string): string {
+  if (!pageStart) return "";
+  if (pageEnd) return ` S. ${pageStart}-${pageEnd}.`;
+  return ` S. ${pageStart}.`;
+}
+
+// ── @-trigger detection (unchanged logic) ──────────────────────────────
 
 /// Detects whether the cursor is inside an @-trigger and returns context.
 /// Returns null if no active trigger.
@@ -86,7 +286,6 @@ export function getAtTriggerContext(
   body: string,
   cursorPos: number
 ): { query: string; startPos: number } | null {
-  // Walk backwards from cursor to find @ that starts the trigger
   const textBeforeCursor = body.slice(0, cursorPos);
   const lastAt = textBeforeCursor.lastIndexOf("@");
   if (lastAt === -1) return null;
@@ -102,6 +301,9 @@ export function getAtTriggerContext(
   return { query, startPos: lastAt };
 }
 
+/// @deprecated Use `getCaretPixelPosition` from `contentEditableUtils.ts` instead.
+/// This was used for the textarea-based editor and is no longer called.
+///
 /// Computes pixel coordinates of a caret position inside a textarea.
 /// Uses the mirror-div technique: clones textarea styles into a hidden div
 /// and measures the position of a marker span.
@@ -112,7 +314,6 @@ export function getCaretCoordinates(
   const div = document.createElement("div");
   const style = getComputedStyle(textarea);
 
-  // Copy relevant styles from textarea to mirror div
   const properties = [
     "fontFamily",
     "fontSize",
@@ -148,7 +349,6 @@ export function getCaretCoordinates(
   div.style.whiteSpace = "pre-wrap";
   div.style.wordWrap = "break-word";
 
-  // Insert text content up to the caret, then a marker span
   const textBefore = textarea.value.slice(0, position);
   div.textContent = textBefore;
 
@@ -158,18 +358,6 @@ export function getCaretCoordinates(
 
   document.body.appendChild(div);
 
-  const spanRect = span.getBoundingClientRect();
-  const textareaRect = textarea.getBoundingClientRect();
-
-  // Account for scroll offset
-  const top =
-    spanRect.top -
-    textareaRect.top +
-    textarea.scrollTop -
-    textarea.scrollTop +
-    span.offsetTop;
-  const left = span.offsetLeft;
-
   document.body.removeChild(div);
 
   return {
@@ -178,34 +366,9 @@ export function getCaretCoordinates(
   };
 }
 
-/// Formats an author list for APA-style citations.
-function formatAuthorsApa(authors: string[]): string {
-  if (authors.length === 0) return "Unknown";
-  // Extract surname (last word) from first author
-  const surname = extractSurname(authors[0]);
-  if (authors.length === 1) return surname;
-  if (authors.length === 2) return `${surname} & ${extractSurname(authors[1])}`;
-  return `${surname} et al.`;
-}
+// ── AI optimize placeholder utilities ──────────────────────────────────
 
-/// Extracts the surname (last word) from a full name string.
-function extractSurname(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/);
-  return parts[parts.length - 1];
-}
-
-/// Builds a display label for a paper to use in citation markers.
-export function buildCitationLabel(
-  authors: string[],
-  year?: number
-): string {
-  const authorPart = formatAuthorsApa(authors);
-  return year ? `${authorPart}, ${year}` : authorPart;
-}
-
-// ── Optimize-mode placeholder utilities ─────────────────────────────────
-
-/// Replaces all {{cite:ID::Label}} markers with numbered [REF1], [REF2], etc.
+/// Replaces all citation markers with numbered [REF1], [REF2], etc.
 /// Returns the cleaned text and a map to restore the original markers later.
 /// Used before sending text to the AI optimizer so citations are never mangled.
 export function replaceCitationsWithPlaceholders(text: string): {
@@ -214,11 +377,10 @@ export function replaceCitationsWithPlaceholders(text: string): {
 } {
   const placeholders = new Map<string, string>();
   let counter = 1;
-  // Map each unique full marker to a placeholder.
   const markerToRef = new Map<string, string>();
 
   const cleaned = text.replace(
-    new RegExp(CITE_REGEX.source, "g"),
+    new RegExp(CITE_ANY_REGEX.source, "g"),
     (fullMatch) => {
       if (markerToRef.has(fullMatch)) {
         return markerToRef.get(fullMatch)!;
@@ -262,11 +424,8 @@ export function restorePlaceholders(
   return { restoredText, missingRefs };
 }
 
-/// Replaces {{cite:ID::Label}} markers with their human-readable label text.
-/// Used to produce clean context for the AI optimizer (e.g., "(Smith et al., 2023)").
-export function stripCitationMarkersToLabels(text: string): string {
-  return text.replace(
-    new RegExp(CITE_REGEX.source, "g"),
-    (_match, _paperId: string, label: string) => `(${label})`
-  );
+/// Removes all citation markers from text, leaving clean prose.
+/// Used to produce clean context for the AI optimizer.
+export function stripCitationMarkers(text: string): string {
+  return text.replace(new RegExp(CITE_ANY_REGEX.source, "g"), "");
 }

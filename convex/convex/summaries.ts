@@ -49,6 +49,41 @@ export const createIdentifiers = mutation({
   },
 });
 
+/// Upserts a single identifier for a paper. If an identifier of the same type
+/// already exists, it updates the value; otherwise inserts a new record.
+/// Allows users to add or correct DOIs from the frontend.
+export const upsertIdentifier = mutation({
+  args: {
+    paperId: v.id("papers"),
+    identifierType: v.union(
+      v.literal("DOI"),
+      v.literal("ISBN"),
+      v.literal("arXiv"),
+      v.literal("other")
+    ),
+    identifierValue: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("paperIdentifiers")
+      .withIndex("by_paper", (q) => q.eq("paperId", args.paperId))
+      .collect();
+
+    const match = existing.find((id) => id.identifierType === args.identifierType);
+
+    if (match) {
+      await ctx.db.patch(match._id, { identifierValue: args.identifierValue });
+      return match._id;
+    }
+
+    return await ctx.db.insert("paperIdentifiers", {
+      paperId: args.paperId,
+      identifierType: args.identifierType,
+      identifierValue: args.identifierValue,
+    });
+  },
+});
+
 // ===== QUERIES =====
 
 export const getSummaryByPaper = query({
@@ -59,6 +94,18 @@ export const getSummaryByPaper = query({
       .withIndex("by_paper", (q) => q.eq("paperId", args.paperId))
       .first();
     return summary;
+  },
+});
+
+/// Returns all DOI identifiers across all papers. Used by the frontend
+/// ZoteroImport component to detect duplicates before importing.
+export const listAllDOIs = query({
+  args: {},
+  handler: async (ctx) => {
+    const allIds = await ctx.db.query("paperIdentifiers").collect();
+    return allIds
+      .filter((id) => id.identifierType === "DOI")
+      .map((id) => ({ paperId: id.paperId, doi: id.identifierValue }));
   },
 });
 

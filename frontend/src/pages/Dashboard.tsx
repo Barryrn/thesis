@@ -21,8 +21,12 @@ import SectionDetailPanel from "@/components/SectionDetailPanel";
 import DocumentLibrary from "@/components/DocumentLibrary";
 import DocumentPreviewModal from "@/components/DocumentPreviewModal";
 import SearchModal from "@/components/SearchModal";
-import { Search } from "lucide-react";
+import ThesisSettingsModal from "@/components/ThesisSettingsModal";
+import ThesisPreviewModal from "@/components/ThesisPreviewModal";
+import { Search, BookOpen, Settings, Eye, Download, Loader2 } from "lucide-react";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
+import { useProvider } from "@/lib/ProviderContext";
+import ProviderToggle from "@/components/ProviderToggle";
 import type { ActiveSection, DragData, PaperId, SectionId, Paper } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -49,6 +53,10 @@ export default function Dashboard() {
     new Set()
   );
   const [searchOpen, setSearchOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const { provider } = useProvider();
 
   // Register Cmd+K / Ctrl+K keyboard shortcut for search
   useEffect(() => {
@@ -60,6 +68,30 @@ export default function Dashboard() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  /// Triggers .docx export via the Python backend and downloads the result.
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`${PYTHON_SERVICE_URL}/export`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Export failed" }));
+        throw new Error(err.detail || `Server error ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "thesis.docx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("[EXPORT] Failed:", err);
+      alert(`Export failed: ${(err as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
   }, []);
 
   const sensors = useSensors(
@@ -109,6 +141,7 @@ export default function Dashboard() {
               notes: s.notes,
             })),
             language: "en",
+            provider,
           }),
         });
       } catch (err) {
@@ -121,7 +154,7 @@ export default function Dashboard() {
         });
       }
     },
-    [papers, sections]
+    [papers, sections, provider]
   );
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -220,6 +253,7 @@ export default function Dashboard() {
           />
         </div>
         <div className="flex items-center gap-2">
+          <ProviderToggle />
           <Button
             variant="ghost"
             size="sm"
@@ -233,6 +267,49 @@ export default function Dashboard() {
               {"\u2318"}K
             </kbd>
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setPreviewOpen(true)}
+            className="text-muted-foreground hover:text-amber gap-1.5"
+            title="Preview thesis"
+            disabled={sections.length === 0}
+          >
+            <Eye className="size-3.5" />
+            <span className="hidden sm:inline text-xs">Preview</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleExport}
+            className="text-muted-foreground hover:text-amber gap-1.5"
+            title="Export as .docx"
+            disabled={exporting || sections.length === 0}
+          >
+            {exporting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Download className="size-3.5" />
+            )}
+            <span className="hidden sm:inline text-xs">
+              {exporting ? "Exporting..." : "Export"}
+            </span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSettingsOpen(true)}
+            className="text-muted-foreground hover:text-amber gap-1.5"
+            title="Thesis settings"
+          >
+            <Settings className="size-3.5" />
+          </Button>
+          <Link to="/bibliography">
+            <button className="text-[11px] px-3 py-1.5 rounded-lg border border-border/30 text-muted-foreground hover:text-foreground hover:border-border/50 transition-colors flex items-center gap-1.5">
+              <BookOpen className="size-3.5" />
+              Literaturverzeichnis
+            </button>
+          </Link>
           <Link to="/upload#upload">
             <Button
               variant="outline"
@@ -316,6 +393,12 @@ export default function Dashboard() {
           onSelectSection={setActiveSection}
         />
       )}
+
+      {/* Thesis settings modal */}
+      <ThesisSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {/* Thesis preview modal */}
+      <ThesisPreviewModal open={previewOpen} onOpenChange={setPreviewOpen} />
     </div>
   );
 }

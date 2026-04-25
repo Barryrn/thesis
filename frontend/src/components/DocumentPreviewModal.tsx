@@ -218,17 +218,20 @@ export default function DocumentPreviewModal({
               {status.label}
             </Badge>
 
-            <div className="h-3 w-px bg-border/50" />
-
-            <a
-              href={paper.fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-amber hover:text-amber/80 transition-colors"
-            >
-              <ExternalLink className="size-3" />
-              View Original
-            </a>
+            {paper.fileUrl && (
+              <>
+                <div className="h-3 w-px bg-border/50" />
+                <a
+                  href={paper.fileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-amber hover:text-amber/80 transition-colors"
+                >
+                  <ExternalLink className="size-3" />
+                  View Original
+                </a>
+              </>
+            )}
           </div>
 
           {/* ─── Identifiers ─── */}
@@ -275,7 +278,7 @@ export default function DocumentPreviewModal({
           )}
 
           {/* ─── PDF tab content (hidden when full-screen overlay is active) ─── */}
-          {activeTab === "pdf" && isPdf && !isPdfFullscreen && (
+          {activeTab === "pdf" && isPdf && !isPdfFullscreen && paper.fileUrl && (
             <PdfViewer fileUrl={paper.fileUrl} />
           )}
 
@@ -575,7 +578,7 @@ export default function DocumentPreviewModal({
           {/* Scrollable PDF centered at a comfortable reading width */}
           <div className="flex-1 overflow-y-auto px-6 py-4">
             <div className="max-w-5xl mx-auto">
-              <PdfViewer fileUrl={paper.fileUrl} />
+              {paper.fileUrl && <PdfViewer fileUrl={paper.fileUrl} />}
             </div>
           </div>
         </div>,

@@ -1,15 +1,7 @@
 import json
-import os
-import time
-from openai import OpenAI
-from dotenv import load_dotenv
 
-from pipeline_logger import get_logger, log_openai_call, log_openai_response
-
-load_dotenv()
-
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-MODEL = "gpt-4o"
+from ai_client import chat_completion
+from pipeline_logger import get_logger
 
 REQUIRED_KEYS = {"researchQuestion", "methodology", "keyFindings", "keywords", "rawSummary"}
 
@@ -63,36 +55,25 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
-def summarize(text: str, language: str = "en") -> dict:
-    """Summarize paper text into a structured dict using OpenAI."""
+def summarize(text: str, language: str = "en", provider: str = "openai") -> dict:
+    """Summarize paper text into a structured dict using the chosen AI provider."""
     logger = get_logger()
 
     if len(text) > CHUNK_SIZE:
         logger.info(f"Text exceeds chunk threshold ({len(text)} > {CHUNK_SIZE}), using chunked summarization",
                      extra={"step": "summarize"})
-        return summarize_large(text, language=language)
+        return summarize_large(text, language=language, provider=provider)
 
     system_prompt = _build_summarize_prompt(language)
-    log_openai_call(MODEL, 2048, len(text))
 
-    t0 = time.monotonic()
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=2048,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text},
-            ],
-        )
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=True)
-    except Exception as e:
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=False, error=str(e))
-        raise
-
-    raw = _strip_fences(response.choices[0].message.content)
+    raw = chat_completion(
+        provider=provider,
+        module="summarizer",
+        system=system_prompt,
+        user_message=text,
+        max_tokens=2048,
+    )
+    raw = _strip_fences(raw)
     result = json.loads(raw)
 
     missing = REQUIRED_KEYS - set(result.keys())
@@ -102,7 +83,7 @@ def summarize(text: str, language: str = "en") -> dict:
     return result
 
 
-def summarize_large(text: str, language: str = "en") -> dict:
+def summarize_large(text: str, language: str = "en", provider: str = "openai") -> dict:
     """Handle texts longer than 12,000 chars by chunking."""
     logger = get_logger()
     chunks = []
@@ -119,35 +100,23 @@ def summarize_large(text: str, language: str = "en") -> dict:
     for i, chunk in enumerate(chunks):
         logger.debug(f"Summarizing chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)",
                       extra={"step": "summarize_chunk"})
-        chunk_summaries.append(_summarize_chunk(chunk, language=language))
+        chunk_summaries.append(_summarize_chunk(chunk, language=language, provider=provider))
 
     combined = "\n\n".join(chunk_summaries)
     logger.info(f"All chunks summarized, combining ({len(combined)} chars) for final summary",
                 extra={"step": "summarize_combine"})
 
-    return summarize(combined, language=language)
+    return summarize(combined, language=language, provider=provider)
 
 
-def _summarize_chunk(chunk: str, language: str = "en") -> str:
+def _summarize_chunk(chunk: str, language: str = "en", provider: str = "openai") -> str:
     """Summarize a single chunk of text as plain prose."""
     system_prompt = _build_chunk_prompt(language)
-    log_openai_call(MODEL, 1024, len(chunk))
 
-    t0 = time.monotonic()
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=1024,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": chunk},
-            ],
-        )
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=True)
-    except Exception as e:
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=False, error=str(e))
-        raise
-
-    return response.choices[0].message.content
+    return chat_completion(
+        provider=provider,
+        module="summarizer",
+        system=system_prompt,
+        user_message=chunk,
+        max_tokens=1024,
+    )

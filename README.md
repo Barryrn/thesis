@@ -1,25 +1,30 @@
 # ThesisOrganizer
 
-A full-stack AI-powered research paper organizer that helps researchers and students map academic papers to their thesis outline. Upload papers, let GPT-4o analyze them, and get intelligent suggestions for which sections each paper supports — complete with relevance scores and extracted excerpts.
+A full-stack AI-powered research paper organizer that helps researchers and students map academic papers to their thesis outline. Upload papers, let GPT-4o analyze them, and get intelligent suggestions for which sections each paper supports — complete with relevance scores, extracted excerpts, and an integrated writing environment.
 
 ## Features
 
-- **Paper Upload & Processing** — Upload PDF, DOCX, or TXT files. The system extracts text, detects metadata (title, authors, year), and identifies academic identifiers (DOI, ISBN, arXiv).
-- **AI-Powered Summarization** — GPT-4o generates structured summaries including research questions, methodology, key findings, and keywords.
-- **Thesis Outline Management** — Create and manage a hierarchical thesis outline with nested sections, notes, and manual ordering.
-- **Intelligent Paper-Section Matching** — AI scores each paper's relevance (0.0–1.0) against every outline section and extracts supporting excerpts.
-- **Interactive Dashboard** — Real-time UI with drag-and-drop reordering, inline editing, excerpt management, and document previews.
+- **Paper Upload & Processing** — Upload PDF, DOCX, or TXT files. The system extracts text, detects metadata (title, authors, year), and identifies academic identifiers (DOI, ISBN, arXiv). Real-time processing progress steps (downloading → extracting → identifying → summarizing → saving) keep you informed.
+- **AI-Powered Summarization** — GPT-4o generates structured summaries including research questions, methodology, key findings, and keywords. Supports multiple languages (English, German).
+- **Thesis Outline Management** — Create and manage a hierarchical thesis outline with nested sections, notes, and manual ordering. Diff-and-patch saves preserve existing citations when you edit the outline.
+- **On-Demand Citation** — Drag a paper onto any outline section to trigger AI scoring. GPT-4o evaluates relevance (0.0–1.0) and extracts verbatim excerpts with page numbers — only for the sections you choose, saving tokens.
+- **Section Write Mode** — Compose thesis prose directly within each section using an integrated editor. Insert inline citations via `@`-trigger, preview formatted references in APA or IEEE style, and auto-save to the cloud.
+- **AI Text Optimization** — Select text in the write editor and choose from four AI-powered rewrite modes: enhance, formalize, simplify, or expand. Citations are preserved through the optimization.
+- **Global Excerpt Search** — Press `Cmd+K` to open a command-palette search across all collected excerpts. Quickly find and navigate to any excerpt by keyword.
+- **Paper Groups** — Organize papers into color-coded collections for easier management and filtering in the Document Library.
+- **Full-Screen PDF Viewer** — Preview uploaded documents in a full-screen overlay with zoom controls and per-section citation trigger buttons.
+- **Interactive Dashboard** — Three-panel layout with drag-and-drop: outline sidebar (navigation + drop targets), section detail panel (matched papers + excerpts), and document library (all papers, searchable and sortable).
 - **Real-Time Sync** — Convex backend provides instant data synchronization across all views.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 19, TypeScript, Vite, TailwindCSS, shadcn/ui |
+| Frontend | React 19, TypeScript, Vite 7, TailwindCSS 4, shadcn/ui |
 | Backend | Convex (BaaS) — real-time database, file storage, HTTP actions |
-| Processing | Python FastAPI — document extraction and AI pipeline |
-| AI | OpenAI GPT-4o — summarization and relevance scoring |
-| UI Libraries | DND-Kit (drag-and-drop), Lucide (icons), Sonner (toasts) |
+| Processing | Python FastAPI — document extraction, summarization, citation, and text optimization |
+| AI | OpenAI GPT-4o — summarization, relevance scoring, excerpt extraction, and text optimization |
+| UI Libraries | DND-Kit (drag-and-drop), react-pdf (document viewer), Lucide (icons), Sonner (toasts) |
 
 ## Architecture
 
@@ -36,9 +41,9 @@ A full-stack AI-powered research paper organizer that helps researchers and stud
                                             └─────────────┘
 ```
 
-1. **Frontend** sends file uploads and outline data to Convex.
-2. **Convex** stores data, triggers an HTTP action to the Python backend.
-3. **Python FastAPI** extracts text, calls OpenAI for summarization and section scoring, then writes results back to Convex.
+1. **Frontend** sends file uploads and outline data to Convex. Also calls the Python backend directly for citation (`/cite`) and text optimization (`/optimize`).
+2. **Convex** stores data, triggers an HTTP action to the Python backend for paper processing.
+3. **Python FastAPI** exposes three endpoints: `/process` (extract + summarize), `/cite` (score sections + extract excerpts), and `/optimize` (AI text rewriting). Results are written back to Convex via the deploy key REST API.
 
 ## Prerequisites
 
@@ -183,11 +188,14 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Usage
 
-1. **Create an Outline** — Go to the Upload page and paste or type your thesis outline with hierarchical sections.
-2. **Upload Papers** — Drag and drop PDF, DOCX, or TXT files into the upload zone.
-3. **Wait for Processing** — The system extracts text, generates summaries, and scores relevance against each section.
-4. **Explore Results** — Navigate your outline in the Dashboard. Each section shows matched papers with relevance scores and excerpts.
-5. **Refine** — Manually adjust matches, add/edit excerpts, reorder papers, and add notes.
+1. **Create an Outline** — Go to the Upload page (`/upload`) and paste or type your thesis outline with numbered sections (e.g., `1. Introduction`, `1.1 Background`). The editor shows a live preview of the parsed tree.
+2. **Upload Papers** — Drag and drop PDF, DOCX, or TXT files into the upload zone. Watch real-time progress as each paper moves through the pipeline.
+3. **Cite Papers** — In the Dashboard, drag a paper from the Document Library onto any outline section in the sidebar. GPT-4o scores relevance and extracts supporting excerpts with page numbers.
+4. **Explore Results** — Click a section to see matched papers with relevance scores, excerpt counts, and page references. Click a paper card to open the detail sheet with all assignments and the AI summary.
+5. **Write** — Switch to the Write tab in the section detail panel to compose thesis prose. Type `@` to insert inline citations, then preview formatted references in APA or IEEE style.
+6. **Optimize Text** — Select text in the write editor and use the AI toolbar to enhance, formalize, simplify, or expand your writing.
+7. **Search Excerpts** — Press `Cmd+K` (or `Ctrl+K`) to search across all collected excerpts and jump to the relevant section.
+8. **Organize** — Create paper groups (color-coded collections), reorder papers via drag-and-drop, and add notes to sections or matches.
 
 ## Project Structure
 
@@ -196,28 +204,40 @@ thesis-organizer/
 ├── frontend/                  # React + Vite frontend
 │   ├── src/
 │   │   ├── pages/             # Dashboard and Upload pages
-│   │   ├── components/        # React components (outline tree, paper cards, etc.)
-│   │   └── lib/               # Types, utilities, parsers
+│   │   ├── components/        # React components (outline tree, paper cards, write editor, etc.)
+│   │   ├── hooks/             # Custom React hooks (useTextOptimize)
+│   │   └── lib/               # Types, utilities, parsers, citation helpers
 │   ├── package.json
 │   └── vite.config.ts
 │
 ├── convex/                    # Convex backend
 │   └── convex/
-│       ├── schema.ts          # Database schema (6 tables)
+│       ├── schema.ts          # Database schema (9 tables)
 │       ├── papers.ts          # Paper CRUD operations
 │       ├── summaries.ts       # Summary and identifier storage
-│       ├── matches.ts         # Paper-section matching
-│       ├── outline.ts         # Outline section management
-│       └── http.ts            # HTTP endpoint for Python integration
+│       ├── matches.ts         # Paper-section matching and excerpts
+│       ├── outline.ts         # Outline section management (diff-and-patch upsert)
+│       ├── sectionContent.ts  # Authored thesis prose per section
+│       ├── groups.ts          # Paper groups and memberships
+│       └── http.ts            # HTTP router for Python integration
 │
 ├── python/                    # FastAPI processing backend
-│   ├── main.py                # API server and processing orchestrator
-│   ├── extractor.py           # PDF/DOCX/TXT text extraction
-│   ├── summarizer.py          # GPT-4o paper summarization
-│   ├── mapper.py              # Section relevance scoring
+│   ├── main.py                # API server (/process, /cite, /optimize endpoints)
+│   ├── extractor.py           # PDF/DOCX/TXT text extraction with page resolution
+│   ├── summarizer.py          # GPT-4o paper summarization (chunked for long texts)
+│   ├── mapper.py              # Section relevance scoring and excerpt extraction
+│   ├── optimizer.py           # AI text optimization (enhance/formalize/simplify/expand)
 │   ├── identifier.py          # DOI/ISBN/arXiv detection
-│   ├── convex_client.py       # Convex API client
+│   ├── convex_client.py       # Convex REST API client
+│   ├── pipeline_logger.py     # Structured pipeline logging
 │   └── requirements.txt       # Python dependencies
+│
+├── docs/                      # Project documentation
+│   ├── frontend-architecture.md
+│   ├── convex-backend.md
+│   ├── paper-processing.md
+│   ├── outline-management.md
+│   └── paper-section-matching.md
 │
 └── assets/                    # Static assets (sample PDFs)
 ```

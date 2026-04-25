@@ -1,0 +1,351 @@
+/* HKA thesis preview stylesheet.
+ * Mimics the HKA Wirtschaftswissenschaften formatting requirements
+ * for on-screen preview rendering. Each page is rendered as a separate
+ * A4-sized card with visible page numbers and spacing between pages.
+ */
+
+/* ── Preview container — dark background between pages ────────────── */
+
+.hka-preview-container {
+  background: #e5e7eb;
+  padding: 24px;
+}
+
+/* ── A4 page card ─────────────────────────────────────────────────── */
+
+.hka-page {
+  position: relative;
+  width: 21cm;
+  min-height: 29.7cm;
+  margin: 0 auto 24px auto;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  border-radius: 2px;
+  overflow: visible;
+}
+
+/* ── Page number indicator (top-right) ────────────────────────────── */
+
+.hka-page-number {
+  position: absolute;
+  top: var(--thesis-pagenumber-top, 1cm);
+  bottom: var(--thesis-pagenumber-bottom, auto);
+  right: var(--thesis-margin-right, 2.5cm);
+  font-family: "Times New Roman", "Times", serif;
+  font-size: 10pt;
+  color: #1a1a1a;
+}
+
+/* ── Main preview content area inside a page ──────────────────────── */
+
+.hka-preview {
+  font-family: "Times New Roman", "Times", serif;
+  font-size: var(--thesis-font-size, 12pt);
+  line-height: var(--thesis-line-spacing, 1.5);
+  text-align: justify;
+  hyphens: auto;
+  color: #1a1a1a;
+  background: #fff;
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: var(--thesis-margin-top, 2.5cm) var(--thesis-margin-right, 2.5cm) var(--thesis-margin-bottom, 2.5cm) var(--thesis-margin-left, 3cm);
+}
+
+/* ── Headings ─────────────────────────────────────────────────────── */
+
+.hka-preview h1,
+.hka-preview h2,
+.hka-preview h3,
+.hka-preview h4 {
+  font-family: "Helvetica Neue", "Arial", sans-serif;
+  font-weight: bold;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  text-align: left;
+}
+
+.hka-preview h1 { font-size: 16pt; }
+.hka-preview h2 { font-size: 14pt; }
+.hka-preview h3 { font-size: 12pt; }
+.hka-preview h4 { font-size: 12pt; }
+
+/* ── Title page ───────────────────────────────────────────────────── */
+
+.hka-title-page {
+  text-align: center;
+  padding: 3cm 0;
+  border-bottom: 2px solid #ccc;
+  margin-bottom: 2cm;
+}
+
+.hka-title-page .thesis-type {
+  font-size: 14pt;
+  font-weight: bold;
+  margin-bottom: 1cm;
+  font-family: "Helvetica Neue", "Arial", sans-serif;
+}
+
+.hka-title-page .thesis-title {
+  font-size: 18pt;
+  font-weight: bold;
+  margin-bottom: 0.5cm;
+  font-family: "Helvetica Neue", "Arial", sans-serif;
+}
+
+.hka-title-page .thesis-subtitle {
+  font-size: 14pt;
+  margin-bottom: 1cm;
+  font-style: italic;
+}
+
+.hka-title-page .thesis-vorlage {
+  font-size: 10pt;
+  margin-bottom: 2cm;
+  font-style: italic;
+}
+
+.hka-title-page .thesis-info {
+  font-size: 10pt;
+  line-height: 1.8;
+  text-align: left;
+  max-width: 14cm;
+  margin: 0 auto;
+}
+
+.hka-title-page .thesis-info .label {
+  display: inline-block;
+  width: 12em;
+  font-weight: bold;
+}
+
+/* ── Page separators ──────────────────────────────────────────────── */
+
+.hka-page-break {
+  border-top: 1px dashed #ccc;
+  margin: 2cm 0;
+  padding-top: 0.5cm;
+  page-break-before: always;
+}
+
+/* ── Footnotes ────────────────────────────────────────────────────── */
+
+.footnote-ref {
+  font-size: 8pt;
+  color: #666;
+  cursor: default;
+}
+
+.hka-footnotes {
+  font-size: 10pt;
+  line-height: 1;
+  margin-top: 1cm;
+  padding-top: 0.5cm;
+  border-top: 1px solid #999;
+}
+
+.hka-footnotes li {
+  margin-bottom: 0.2cm;
+}
+
+/* ── Figures ──────────────────────────────────────────────────────── */
+
+.thesis-figure {
+  margin: 1cm 0;
+  text-align: center;
+}
+
+.thesis-figure img {
+  max-width: 100%;
+  height: auto;
+}
+
+.thesis-figure figcaption {
+  font-size: 10pt;
+  font-style: italic;
+  margin-top: 0.3cm;
+  text-align: center;
+  line-height: 1.15;
+}
+
+/* ── Formulas ─────────────────────────────────────────────────────── */
+
+.formula-display {
+  margin: 0.5cm 0;
+  display: flex;
+  align-items: center;
+}
+
+.formula-display .formula-content {
+  flex: 1;
+  text-align: center;
+}
+
+.formula-display .formula-number {
+  font-size: 12pt;
+  color: #1a1a1a;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.formula-inline {
+  display: inline;
+}
+
+.formula-error {
+  color: red;
+  font-style: italic;
+}
+
+/* ── Abstracts ────────────────────────────────────────────────────── */
+
+.hka-abstract {
+  margin-bottom: 1cm;
+}
+
+.hka-abstract .keywords {
+  font-size: 10pt;
+  margin-top: 0.5cm;
+  font-style: italic;
+}
+
+/* ── TOC ──────────────────────────────────────────────────────────── */
+
+.hka-toc-entry {
+  display: flex;
+  align-items: baseline;
+  padding: 0.15cm 0;
+}
+
+.hka-toc-entry .toc-number {
+  width: 3em;
+  flex-shrink: 0;
+}
+
+.hka-toc-entry .toc-title {
+  flex: 1;
+}
+
+.hka-toc-entry.depth-0 { font-weight: bold; }
+.hka-toc-entry.depth-1 { padding-left: 1.5em; }
+.hka-toc-entry.depth-2 { padding-left: 3em; }
+.hka-toc-entry.depth-3 { padding-left: 4.5em; }
+
+/* ── Bibliography ─────────────────────────────────────────────────── */
+
+.hka-bib-entry {
+  margin-bottom: 0.3cm;
+  padding-left: 3em;
+  text-indent: -3em;
+}
+
+.hka-bib-entry .bib-kuerzel {
+  font-weight: bold;
+}
+
+/* ── Declaration ──────────────────────────────────────────────────── */
+
+.hka-declaration {
+  margin-top: 2cm;
+}
+
+.hka-declaration .signature-line {
+  margin-top: 3cm;
+  display: flex;
+  gap: 4cm;
+}
+
+.hka-declaration .signature-line span {
+  border-top: 1px solid #333;
+  padding-top: 0.2cm;
+  font-size: 10pt;
+}
+
+/* ── Orphan markers ───────────────────────────────────────────────── */
+
+.orphan-marker {
+  color: red;
+  font-style: italic;
+  font-size: 10pt;
+}
+
+/* ── ContentEditable editor markers ──────────────────────────────── */
+
+.ce-citation {
+  display: inline;
+  cursor: default;
+  user-select: all;
+}
+
+.ce-citation sup {
+  font-size: 8pt;
+  color: #d97706;
+  font-weight: 500;
+}
+
+.ce-formula-display {
+  display: block;
+  text-align: center;
+  margin: 0.3em 0;
+  padding: 0.2em 0.4em;
+  background: rgba(217, 119, 6, 0.05);
+  border-radius: 4px;
+  font-family: "Fira Code", "Menlo", monospace;
+  font-size: 0.85em;
+  color: rgba(217, 119, 6, 0.8);
+  cursor: text;
+}
+
+.ce-formula-inline {
+  display: inline;
+  font-family: "Fira Code", "Menlo", monospace;
+  font-size: 0.85em;
+  color: rgba(217, 119, 6, 0.8);
+  background: rgba(217, 119, 6, 0.05);
+  padding: 0 0.2em;
+  border-radius: 2px;
+  cursor: text;
+}
+
+.ce-figure {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(217, 119, 6, 0.1);
+  border-radius: 3px;
+  font-size: 10px;
+  color: #92400e;
+  user-select: all;
+}
+
+/* Placeholder for empty contentEditable */
+[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: rgba(148, 163, 184, 0.4);
+  pointer-events: none;
+}
+
+/* ── Print styles ─────────────────────────────────────────────────── */
+
+@media print {
+  .hka-preview-container {
+    background: none;
+    padding: 0;
+  }
+
+  .hka-page {
+    box-shadow: none;
+    margin-bottom: 0;
+    page-break-after: always;
+  }
+
+  .hka-preview {
+    padding: 0;
+    max-width: none;
+  }
+
+  .hka-page-break {
+    border: none;
+    margin: 0;
+    padding: 0;
+  }
+}

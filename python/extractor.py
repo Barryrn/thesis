@@ -4,6 +4,7 @@ import json
 import os
 import re
 
+from ai_client import chat_completion
 from pipeline_logger import get_logger
 
 
@@ -15,7 +16,7 @@ METADATA_LENGTH = 2_000
 HEADER_FOOTER_RE = re.compile(r"^\s*(\d+)\s*$")
 
 
-def extract(file_path: str) -> dict:
+def extract(file_path: str, provider: str = "openai") -> dict:
     """Extract text and metadata from a PDF, DOCX, or TXT file."""
     logger = get_logger()
     file_size = os.path.getsize(file_path)
@@ -28,7 +29,7 @@ def extract(file_path: str) -> dict:
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext == ".pdf":
-        text, page_source = _extract_pdf(file_path)
+        text, page_source = _extract_pdf(file_path, provider=provider)
     elif ext == ".docx":
         text = _extract_docx(file_path)
         page_source = "approximate"
@@ -51,7 +52,7 @@ def extract(file_path: str) -> dict:
     }
 
 
-def _extract_pdf(file_path: str) -> tuple[str, str]:
+def _extract_pdf(file_path: str, provider: str = "openai") -> tuple[str, str]:
     """Extract text from PDF with resolved page numbers.
 
     Uses a two-pass approach:
@@ -108,7 +109,7 @@ def _extract_pdf(file_path: str) -> tuple[str, str]:
         label_map, page_source = _resolve_page_regex(page_texts)
 
     if label_map is None:
-        label_map, page_source = _resolve_page_ai(page_texts)
+        label_map, page_source = _resolve_page_ai(page_texts, provider=provider)
 
     if label_map is None:
         # Ultimate fallback: use 1-based physical index
@@ -235,17 +236,14 @@ def _resolve_page_regex(page_texts: list[str]) -> tuple[dict[int, str] | None, s
 
 def _resolve_page_ai(
     page_texts: list[str],
+    provider: str = "openai",
 ) -> tuple[dict[int, str] | None, str]:
-    """Use GPT-4o-mini to detect printed page numbers from sample pages.
+    """Use AI to detect printed page numbers from sample pages.
 
     Sends the first and last 3 lines of 5 evenly-spaced sample pages.
     Detects the printed page number for each sample, calculates a single
     integer offset, and applies it uniformly.
     """
-    from openai import OpenAI
-    from dotenv import load_dotenv
-
-    load_dotenv()
     logger = get_logger()
 
     # Select up to 5 evenly-spaced non-empty pages
@@ -279,23 +277,13 @@ def _resolve_page_ai(
     )
 
     try:
-        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        raw = chat_completion(
+            provider=provider,
+            module="extractor",
+            system="You detect page numbers from academic PDF snippets. Return only valid JSON.",
+            user_message=prompt,
             max_tokens=256,
-            messages=[
-                {"role": "system", "content": "You detect page numbers from academic PDF snippets. Return only valid JSON."},
-                {"role": "user", "content": prompt},
-            ],
         )
-
-        raw = response.choices[0].message.content.strip()
-        # Strip markdown fences if present
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
-        raw = raw.strip()
 
         results = json.loads(raw)
         if not isinstance(results, list):

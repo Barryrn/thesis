@@ -3,6 +3,7 @@ import { useMutation, useQuery, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/lib/LanguageContext";
+import { useProvider } from "@/lib/ProviderContext";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
 import type { UploadFileState } from "@/lib/types";
 
@@ -105,7 +106,12 @@ type LogEntry = {
   message: string;
 };
 
-export default function UploadZone() {
+interface UploadZoneProps {
+  /// Zotero collection key to place newly created items into.
+  zoteroCollection?: string;
+}
+
+export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
   const [files, setFiles] = useState<UploadFileState[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -118,6 +124,7 @@ export default function UploadZone() {
   const updatePaperStatus = useMutation(api.papers.updatePaperStatus);
   const convexClient = useConvex();
   const { language } = useLanguage();
+  const { provider } = useProvider();
 
   function addLog(level: LogEntry["level"], message: string) {
     const time = new Date().toLocaleTimeString();
@@ -259,7 +266,10 @@ export default function UploadZone() {
         const pyResponse = await fetch(`${PYTHON_SERVICE_URL}/process`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paperId, fileUrl, sections: sectionData, fileName: file.name, language }),
+          body: JSON.stringify({
+            paperId, fileUrl, sections: sectionData, fileName: file.name,
+            language, provider, zotero_collection: zoteroCollection,
+          }),
         });
         if (!pyResponse.ok) {
           let detail = `HTTP ${pyResponse.status}`;
@@ -272,7 +282,22 @@ export default function UploadZone() {
           addLog("error", `[${file.name}] Step 5/5 FAILED: Python error — ${detail}`);
           throw new Error(`Python processing failed: ${detail}`);
         }
-        addLog("ok", `[${file.name}] Step 5/5: Python processing complete`);
+
+        // Show which metadata source was used
+        try {
+          const result = await pyResponse.json();
+          const sourceLabels: Record<string, string> = {
+            zotero_found: "Zotero (existing item found)",
+            zotero_created: "Zotero (new item created)",
+            crossref: "CrossRef",
+            openalex: "OpenAlex",
+            none: "none (manual entry needed)",
+          };
+          const src = sourceLabels[result.metadataSource] ?? result.metadataSource;
+          addLog("ok", `[${file.name}] Step 5/5: Processing complete — metadata source: ${src}`);
+        } catch {
+          addLog("ok", `[${file.name}] Step 5/5: Python processing complete`);
+        }
       } catch (err) {
         if ((err as Error).message.startsWith("Python processing failed:")) throw err;
         addLog("error", `[${file.name}] Step 5/5 FAILED: ${(err as Error).message}`);

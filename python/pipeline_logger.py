@@ -207,15 +207,15 @@ class PipelineStep:
 # ---------------------------------------------------------------------------
 
 
-def log_openai_call(model: str, max_tokens: int, input_chars: int) -> None:
-    """Log an outgoing OpenAI API call (DEBUG level)."""
+def log_ai_call(provider: str, model: str, max_tokens: int, input_chars: int) -> None:
+    """Log an outgoing AI API call (DEBUG level)."""
     logger = get_logger()
     logger.debug(
-        f"OpenAI API call: model={model}, max_tokens={max_tokens}, "
+        f"{provider} API call: model={model}, max_tokens={max_tokens}, "
         f"input_chars={input_chars}",
         extra={
-            "step": "openai_call",
-            "api": "openai",
+            "step": "ai_call",
+            "api": provider,
             "model": model,
             "max_tokens": max_tokens,
             "input_chars": input_chars,
@@ -223,8 +223,8 @@ def log_openai_call(model: str, max_tokens: int, input_chars: int) -> None:
     )
 
 
-def log_openai_response(model: str, elapsed_ms: float, success: bool, error: str = "") -> None:
-    """Log the result of an OpenAI API call."""
+def log_ai_response(provider: str, model: str, elapsed_ms: float, success: bool, error: str = "") -> None:
+    """Log the result of an AI API call."""
     logger = get_logger()
     if success:
         slow = elapsed_ms > SLOW_THRESHOLD_MS
@@ -232,9 +232,9 @@ def log_openai_response(model: str, elapsed_ms: float, success: bool, error: str
         suffix = " [SLOW]" if slow else ""
         logger.log(
             level,
-            f"OpenAI response received: model={model} ({elapsed_ms}ms){suffix}",
+            f"{provider} response received: model={model} ({elapsed_ms}ms){suffix}",
             extra={
-                "step": "openai_response",
+                "step": "ai_response",
                 "status": "completed",
                 "model": model,
                 "elapsed_ms": elapsed_ms,
@@ -242,12 +242,23 @@ def log_openai_response(model: str, elapsed_ms: float, success: bool, error: str
         )
     else:
         logger.error(
-            f"OpenAI call failed: model={model} ({elapsed_ms}ms) - {error}",
+            f"{provider} call failed: model={model} ({elapsed_ms}ms) - {error}",
             extra={
-                "step": "openai_response",
+                "step": "ai_response",
                 "status": "failed",
                 "model": model,
                 "elapsed_ms": elapsed_ms,
                 "error_message": error,
             },
         )
+
+
+# Backward-compatible aliases
+def log_openai_call(model: str, max_tokens: int, input_chars: int) -> None:
+    """Backward-compatible wrapper — delegates to log_ai_call."""
+    log_ai_call("openai", model, max_tokens, input_chars)
+
+
+def log_openai_response(model: str, elapsed_ms: float, success: bool, error: str = "") -> None:
+    """Backward-compatible wrapper — delegates to log_ai_response."""
+    log_ai_response("openai", model, elapsed_ms, success, error)

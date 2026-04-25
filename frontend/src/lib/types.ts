@@ -107,8 +107,87 @@ export interface MatchExcerpt {
   pageNumberApproximate?: boolean;
 }
 
-/// Supported citation formatting styles for the preview pane.
-export type CitationStyle = "apa" | "ieee";
+/// Supported bibliography source types per HKA guidelines.
+export type SourceType =
+  | "book"
+  | "bookChapter"
+  | "journalArticle"
+  | "newspaperArticle"
+  | "internetSource";
+
+/// Whether a citation is a direct (wörtliches) or indirect (sinngemäßes) quote.
+export type CitationType = "direct" | "indirect";
+
+export type Source = Doc<"sources">;
+export type SourceId = Id<"sources">;
+
+/// A parsed citation marker extracted from body text.
+export interface ParsedCitation {
+  fullMatch: string;
+  paperId: string;
+  citationType: CitationType;
+  pageRef: string;
+  /// Present only for secondary source citations ("zitiert nach").
+  secondaryPaperId?: string;
+  secondaryPageRef?: string;
+}
+
+/// A single footnote entry for display in the editor footnote panel.
+export interface FootnoteEntry {
+  number: number;
+  kuerzel: string;
+  pageRef: string;
+  citationType: CitationType;
+  paperId: string;
+  /// Present only for secondary source footnotes.
+  secondaryKuerzel?: string;
+  secondaryPageRef?: string;
+}
+
+// ===== ZOTERO IMPORT =====
+
+export interface ZoteroCollection {
+  key: string;
+  name: string;
+  parentCollection: string | false;
+}
+
+export interface ZoteroItem {
+  key: string;
+  title: string;
+  authors: string[];
+  year?: number;
+  doi?: string;
+  isbn?: string;
+  itemType: string;
+  sourceType: SourceType;
+  hasPdf: boolean;
+  pdfAttachmentKey?: string;
+  sourceMetadata: {
+    publisher?: string;
+    journalName?: string;
+    volume?: string;
+    issue?: string;
+    pageStart?: string;
+    pageEnd?: string;
+    url?: string;
+    editorNames?: string[];
+    editorBookTitle?: string;
+    newspaperName?: string;
+    publishDate?: string;
+    publisherLocation?: string;
+    edition?: string;
+    accessDate?: string;
+    language?: string;
+  };
+}
+
+export interface ZoteroImportResult {
+  itemKey: string;
+  status: "success" | "error";
+  paperId?: string;
+  error?: string;
+}
 
 /// AI text optimization modes available in the write tab toolbar.
 export type OptimizeMode = "enhance" | "formalize" | "simplify" | "expand";

@@ -1,0 +1,90 @@
+<h2>Write Tab — Toolbar + Preview Mockup</h2>
+<p class="subtitle">This is how the optimize toolbar and preview panel will look in the SectionWriteEditor</p>
+
+<div class="section">
+  <h3>Normal State (text selected)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Write Tab — SectionWriteEditor</div>
+    <div class="mockup-body" style="font-family: sans-serif; font-size: 13px;">
+      <!-- Toolbar row -->
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 10px; color: #888;">Type <kbd style="background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; font-size: 9px;">@</kbd> to cite</span>
+          <span style="color: rgba(255,255,255,0.15); margin: 0 4px;">|</span>
+          <!-- Optimize buttons -->
+          <span style="font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px;">Optimize:</span>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(245,158,11,0.1); color: #F59E0B; border: none; cursor: pointer;">✨ Enhance</button>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(255,255,255,0.05); color: #999; border: none; cursor: pointer;">📐 Formalize</button>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(255,255,255,0.05); color: #999; border: none; cursor: pointer;">✂️ Simplify</button>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(255,255,255,0.05); color: #999; border: none; cursor: pointer;">📝 Expand</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 12px; color: #888;">Preview</span>
+          <span style="font-size: 10px; color: #666;">✓ Saved</span>
+        </div>
+      </div>
+      <!-- Textarea mockup -->
+      <div style="min-height: 180px; padding: 12px; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; margin-top: 12px; color: #ccc; line-height: 1.7; font-size: 13px;">
+        The methodology employed in this study follows <span style="background: rgba(245,158,11,0.15); padding: 1px 2px; border-radius: 2px;">{{cite:abc123::Smith et al., 2023}}</span> who proposed that machine learning models can be <span style="background: rgba(100,180,255,0.2); color: #8cb4ff;">effectively used for classification of biomedical signals when combined with appropriate preprocessing</span> techniques as described by <span style="background: rgba(245,158,11,0.15); padding: 1px 2px; border-radius: 2px;">{{cite:def456::Johnson, 2022}}</span>.
+      </div>
+      <p style="font-size: 10px; color: #555; margin-top: 6px;">💡 Selected text shown in blue highlight. Buttons enabled when text is selected.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Preview State (after clicking Enhance)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Write Tab — Reviewing Optimization</div>
+    <div class="mockup-body" style="font-family: sans-serif; font-size: 13px;">
+      <!-- Toolbar row (disabled during preview) -->
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.08); opacity: 0.4;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 10px; color: #888;">Type <kbd style="background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; font-size: 9px;">@</kbd> to cite</span>
+          <span style="color: rgba(255,255,255,0.15); margin: 0 4px;">|</span>
+          <span style="font-size: 9px; color: #666; text-transform: uppercase;">Optimize:</span>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(255,255,255,0.05); color: #666; border: none;">✨ Enhance</button>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(255,255,255,0.05); color: #666; border: none;">📐 Formalize</button>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(255,255,255,0.05); color: #666; border: none;">✂️ Simplify</button>
+          <button style="font-size: 10px; padding: 2px 10px; border-radius: 12px; background: rgba(255,255,255,0.05); color: #666; border: none;">📝 Expand</button>
+        </div>
+      </div>
+
+      <!-- Preview panel -->
+      <div style="margin-top: 12px; border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; background: rgba(245,158,11,0.03); overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid rgba(245,158,11,0.15);">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.8px; color: #F59E0B;">✨ Enhanced Text</span>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button style="font-size: 10px; padding: 3px 12px; border-radius: 6px; background: transparent; color: #888; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">Discard</button>
+            <button style="font-size: 10px; padding: 3px 12px; border-radius: 6px; background: rgba(245,158,11,0.15); color: #F59E0B; border: 1px solid rgba(245,158,11,0.3); cursor: pointer;">Accept</button>
+          </div>
+        </div>
+        <div style="padding: 12px; color: #ccc; line-height: 1.7; font-size: 13px;">
+          effectively utilized for the classification of biomedical signals, particularly when integrated with rigorous preprocessing
+        </div>
+      </div>
+
+      <!-- Textarea dimmed -->
+      <div style="min-height: 140px; padding: 12px; border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; margin-top: 12px; color: #666; line-height: 1.7; font-size: 13px; opacity: 0.5;">
+        The methodology employed in this study follows {{cite:abc123::Smith et al., 2023}} who proposed that machine learning models can be <span style="background: rgba(100,180,255,0.15);">effectively used for classification of biomedical signals when combined with appropriate preprocessing</span> techniques as described by {{cite:def456::Johnson, 2022}}.
+      </div>
+      <p style="font-size: 10px; color: #555; margin-top: 6px;">⚠️ Textarea dimmed and read-only during review. Citations in original text are preserved.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Loading State</h3>
+  <div class="mockup">
+    <div class="mockup-header">Write Tab — Optimizing...</div>
+    <div class="mockup-body" style="font-family: sans-serif; font-size: 13px;">
+      <div style="margin-top: 12px; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; display: flex; align-items: center; gap: 10px;">
+        <div style="width: 14px; height: 14px; border: 2px solid rgba(245,158,11,0.3); border-top-color: #F59E0B; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        <span style="font-size: 12px; color: #888;">Enhancing selected text...</span>
+      </div>
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    </div>
+  </div>
+</div>

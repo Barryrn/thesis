@@ -1,0 +1,56 @@
+<h2>Text Optimize Toolbar — Approach Comparison</h2>
+<p class="subtitle">Two approaches for the fixed toolbar + review flow. Consider citation safety and UX.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Inline Preview Panel (Recommended)</h3>
+      <p>Optimize buttons live in the existing toolbar row. When AI returns the result, a preview panel slides in <strong>between the toolbar and textarea</strong>, showing the optimized text with an Accept/Discard button pair. The textarea is dimmed but visible beneath.</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>User sees the result in context before applying</li>
+            <li>Clear accept/discard affordance</li>
+            <li>Citation markers visible in preview</li>
+            <li>Simple to build — no diff library needed</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>Can't see original and new side-by-side</li>
+            <li>Preview panel takes vertical space</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Side-by-Side Diff Panel</h3>
+      <p>Same toolbar buttons, but when AI returns, the textarea splits into two columns: <strong>original (left) vs optimized (right)</strong>. User reviews both and clicks Accept or Discard. Citations are highlighted in both panels.</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>Direct visual comparison — easy to spot changes</li>
+            <li>User can verify citations preserved at a glance</li>
+            <li>Professional diff experience</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>More complex to build (split layout, scroll sync)</li>
+            <li>Horizontal space may be tight</li>
+            <li>Overkill for small text selections</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

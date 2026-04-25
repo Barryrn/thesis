@@ -1,15 +1,7 @@
 import json
-import os
-import time
-from openai import OpenAI
-from dotenv import load_dotenv
 
-from pipeline_logger import get_logger, log_openai_call, log_openai_response
-
-load_dotenv()
-
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-MODEL = "gpt-4o"
+from ai_client import chat_completion
+from pipeline_logger import get_logger
 
 MAX_TEXT_CHARS = 30_000
 
@@ -59,7 +51,8 @@ Rules:
 
 
 def score_sections(
-    summary: dict, sections: list[dict], paper_text: str = "", language: str = "en"
+    summary: dict, sections: list[dict], paper_text: str = "", language: str = "en",
+    provider: str = "openai",
 ) -> list[dict]:
     """Score thesis sections against a paper and extract supporting excerpts."""
     # Build a lookup from orderNumber to _id for fallback resolution
@@ -87,34 +80,15 @@ def score_sections(
 
     system_prompt = _build_score_prompt(language)
     logger = get_logger()
-
-    log_openai_call(MODEL, 8192, len(user_message))
     logger.info(f"Scoring {len(sections)} sections against paper", extra={"step": "score_sections"})
 
-    t0 = time.monotonic()
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            max_tokens=8192,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-        )
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=True)
-    except Exception as e:
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        log_openai_response(MODEL, elapsed, success=False, error=str(e))
-        raise
-
-    raw = response.choices[0].message.content.strip()
-    # Strip markdown fences GPT sometimes adds
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-    if raw.endswith("```"):
-        raw = raw[:-3]
-    raw = raw.strip()
+    raw = chat_completion(
+        provider=provider,
+        module="mapper",
+        system=system_prompt,
+        user_message=user_message,
+        max_tokens=8192,
+    )
     scores = json.loads(raw)
 
     if not isinstance(scores, list):

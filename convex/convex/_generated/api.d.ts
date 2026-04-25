@@ -8,13 +8,17 @@
  * @module
  */
 
+import type * as figures from "../figures.js";
 import type * as groups from "../groups.js";
 import type * as http from "../http.js";
 import type * as matches from "../matches.js";
 import type * as outline from "../outline.js";
 import type * as papers from "../papers.js";
 import type * as sectionContent from "../sectionContent.js";
+import type * as sources from "../sources.js";
 import type * as summaries from "../summaries.js";
+import type * as thesisExport from "../thesisExport.js";
+import type * as thesisMetadata from "../thesisMetadata.js";
 
 import type {
   ApiFromModules,
@@ -23,13 +27,17 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  figures: typeof figures;
   groups: typeof groups;
   http: typeof http;
   matches: typeof matches;
   outline: typeof outline;
   papers: typeof papers;
   sectionContent: typeof sectionContent;
+  sources: typeof sources;
   summaries: typeof summaries;
+  thesisExport: typeof thesisExport;
+  thesisMetadata: typeof thesisMetadata;
 }>;
 
 /**

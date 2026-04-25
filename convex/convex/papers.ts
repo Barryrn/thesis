@@ -164,6 +164,15 @@ export const deletePaper = mutation({
       await ctx.db.delete(identifier._id);
     }
 
+    // 4b. Delete source record
+    const sources = await ctx.db
+      .query("sources")
+      .withIndex("by_paper", (q) => q.eq("paperId", args.paperId))
+      .collect();
+    for (const source of sources) {
+      await ctx.db.delete(source._id);
+    }
+
     // 5. Delete stored PDF file
     if (paper.storageId) {
       await ctx.storage.delete(paper.storageId);
@@ -203,6 +212,12 @@ export const deleteAllPapers = mutation({
       await ctx.db.delete(identifier._id);
     }
 
+    // 4b. Delete all source records
+    const sources = await ctx.db.query("sources").collect();
+    for (const source of sources) {
+      await ctx.db.delete(source._id);
+    }
+
     // 5. Delete stored PDF files and paper records
     const papers = await ctx.db.query("papers").collect();
     for (const paper of papers) {
@@ -213,6 +228,70 @@ export const deleteAllPapers = mutation({
     }
 
     return { deleted: papers.length };
+  },
+});
+
+// ===== ZOTERO IMPORT =====
+
+/// Creates a paper record from Zotero metadata. Unlike `createPaper`, file
+/// fields are optional — papers without a PDF get status "completed" immediately
+/// since there is nothing to process until the user attaches a file.
+export const createPaperFromZotero = mutation({
+  args: {
+    title: v.string(),
+    authors: v.array(v.string()),
+    year: v.optional(v.number()),
+    storageId: v.optional(v.string()),
+    fileUrl: v.optional(v.string()),
+    fileName: v.optional(v.string()),
+    zoteroItemKey: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("papers", {
+      title: args.title,
+      authors: args.authors,
+      year: args.year,
+      storageId: args.storageId,
+      fileUrl: args.fileUrl,
+      fileName: args.fileName,
+      zoteroItemKey: args.zoteroItemKey,
+      status: args.storageId ? "pending" : "completed",
+      uploadedAt: Date.now(),
+    });
+  },
+});
+
+/// Attaches a PDF file to a metadata-only paper (e.g. imported from Zotero
+/// without a PDF). Sets status to "pending" so the processing pipeline picks
+/// it up.
+export const attachFileToPaper = mutation({
+  args: {
+    paperId: v.id("papers"),
+    storageId: v.string(),
+    fileUrl: v.string(),
+    fileName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.paperId, {
+      storageId: args.storageId,
+      fileUrl: args.fileUrl,
+      fileName: args.fileName,
+      status: "pending",
+    });
+  },
+});
+
+/// Links an existing paper to a Zotero library item. Called by the /process
+/// pipeline after creating or finding a Zotero item for an uploaded paper.
+export const updateZoteroItemKey = mutation({
+  args: {
+    paperId: v.id("papers"),
+    zoteroItemKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.paperId, {
+      zoteroItemKey: args.zoteroItemKey,
+    });
   },
 });
 

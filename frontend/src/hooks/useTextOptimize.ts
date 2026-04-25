@@ -3,8 +3,16 @@ import { PYTHON_SERVICE_URL } from "@/lib/config";
 import {
   replaceCitationsWithPlaceholders,
   restorePlaceholders,
-  stripCitationMarkersToLabels,
+  stripCitationMarkers,
 } from "@/lib/citationUtils";
+import {
+  replaceFormulasWithPlaceholders,
+  restoreFormulaPlaceholders,
+} from "@/lib/formulaUtils";
+import {
+  replaceFigureMarkersWithPlaceholders,
+  restoreFigurePlaceholders,
+} from "@/lib/figureUtils";
 import type { OptimizeMode } from "@/lib/types";
 
 /// Possible states for the optimize workflow.
@@ -47,7 +55,7 @@ function extractContextBefore(body: string, start: number): string {
     segment.lastIndexOf("\n\n")
   );
   const contextStart = lastPeriod >= 0 ? lastPeriod + 1 : 0;
-  return stripCitationMarkersToLabels(segment.slice(contextStart).trim());
+  return stripCitationMarkers(segment.slice(contextStart).trim());
 }
 
 /// Extracts ~1 sentence of context after the selection end.
@@ -59,7 +67,7 @@ function extractContextAfter(body: string, end: number): string {
   // Find first sentence boundary in the segment.
   const firstPeriod = segment.search(/\.\s|\.\n|\n\n/);
   const contextEnd = firstPeriod >= 0 ? firstPeriod + 1 : segment.length;
-  return stripCitationMarkersToLabels(segment.slice(0, contextEnd).trim());
+  return stripCitationMarkers(segment.slice(0, contextEnd).trim());
 }
 
 /// Hook that encapsulates the AI text optimization workflow.
@@ -67,7 +75,7 @@ function extractContextAfter(body: string, end: number): string {
 /// Manages the full lifecycle: request → loading → preview/error → accept/discard.
 /// Citation markers are swapped to placeholders before the AI call and restored
 /// after, ensuring they are never lost or corrupted.
-export function useTextOptimize(body: string, language: string = "en") {
+export function useTextOptimize(body: string, language: string = "en", provider: string = "openai") {
   const [state, setState] = useState<OptimizeState>(INITIAL_STATE);
   /// Abort controller so we can cancel in-flight requests on discard.
   const abortRef = useRef<AbortController | null>(null);
@@ -94,9 +102,13 @@ export function useTextOptimize(body: string, language: string = "en") {
       });
 
       try {
-        // Swap citations for safe placeholders.
-        const { cleaned, placeholders } =
+        // Swap citations, formulas, and figure markers for safe placeholders.
+        const { cleaned: citeCleaned, placeholders } =
           replaceCitationsWithPlaceholders(selectedText);
+        const { cleaned: formulaCleaned, placeholders: formulaPlaceholders } =
+          replaceFormulasWithPlaceholders(citeCleaned);
+        const { cleaned, placeholders: figurePlaceholders } =
+          replaceFigureMarkersWithPlaceholders(formulaCleaned);
 
         // Gather surrounding context for better AI results.
         const contextBefore = extractContextBefore(body, selectionStart);
@@ -112,6 +124,7 @@ export function useTextOptimize(body: string, language: string = "en") {
             context_before: contextBefore,
             context_after: contextAfter,
             language,
+            provider,
           }),
         });
 
@@ -123,17 +136,22 @@ export function useTextOptimize(body: string, language: string = "en") {
         const data = await res.json();
         const rawOptimized: string = data.optimized;
 
-        // Restore citation markers from placeholders.
+        // Restore figure markers, then formula markers, then citation markers.
+        const { restored: figureRestored, missing: missingFigures } =
+          restoreFigurePlaceholders(rawOptimized, figurePlaceholders);
+        const { restored: formulaRestored, missing: missingFormulas } =
+          restoreFormulaPlaceholders(figureRestored, formulaPlaceholders);
         const { restoredText, missingRefs } = restorePlaceholders(
-          rawOptimized,
+          formulaRestored,
           placeholders
         );
 
-        if (missingRefs.length > 0) {
+        const allMissing = [...missingRefs, ...missingFormulas, ...missingFigures];
+        if (allMissing.length > 0) {
           setState((prev) => ({
             ...prev,
             status: "error",
-            error: `Citation lost during optimization (${missingRefs.join(", ")}). Please try again.`,
+            error: `Reference lost during optimization (${allMissing.join(", ")}). Please try again.`,
           }));
           return;
         }
@@ -152,7 +170,7 @@ export function useTextOptimize(body: string, language: string = "en") {
         }));
       }
     },
-    [body, language]
+    [body, language, provider]
   );
 
   /// Accepts the optimized text, splicing it into the body at the original
