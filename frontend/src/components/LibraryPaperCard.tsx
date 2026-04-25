@@ -208,6 +208,23 @@ export default function LibraryPaperCard({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Origin badge */}
+          {paper.zoteroItemKey ? (
+            <Badge
+              variant="outline"
+              className="text-[10px] h-4 px-1.5 border-blue-500/20 text-blue-500"
+            >
+              Zotero
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              className="text-[10px] h-4 px-1.5 border-border/30 text-muted-foreground"
+            >
+              Manuell
+            </Badge>
+          )}
+
           {isUnassigned && (
             <Badge
               variant="outline"

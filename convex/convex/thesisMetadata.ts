@@ -14,6 +14,24 @@ export const getMetadata = query({
 
 // ===== MUTATIONS =====
 
+/// Convex validator for AI prompt settings — shared between mutations.
+const aiPromptSettingsValidator = v.object({
+  enhance: v.optional(v.string()),
+  formalize: v.optional(v.string()),
+  simplify: v.optional(v.string()),
+  expand: v.optional(v.string()),
+});
+
+/// Convex validator for citation settings — shared between mutations.
+const citationSettingsValidator = v.object({
+  style: v.union(
+    v.literal("hkaFootnote"),
+    v.literal("numbered"),
+    v.literal("authorYear")
+  ),
+  ordering: v.union(v.literal("alphabetical"), v.literal("appearance")),
+});
+
 /// Convex validator for layout settings — shared between mutations.
 const layoutSettingsValidator = v.object({
   fontSize: v.number(),
@@ -89,6 +107,54 @@ export const updateLayoutSettings = mutation({
       studentName: "",
       titleDE: "",
       layoutSettings: args.layoutSettings,
+    });
+  },
+});
+
+/// Updates only the citation settings on the thesis metadata singleton.
+/// Separate from upsertMetadata so the preview panel can auto-save
+/// without requiring all mandatory metadata fields.
+export const updateCitationSettings = mutation({
+  args: { citationSettings: citationSettingsValidator },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.query("thesisMetadata").collect();
+
+    if (existing.length > 0) {
+      await ctx.db.patch(existing[0]._id, {
+        citationSettings: args.citationSettings,
+      });
+      return existing[0]._id;
+    }
+
+    // Create a minimal metadata doc if none exists yet.
+    return await ctx.db.insert("thesisMetadata", {
+      studentName: "",
+      titleDE: "",
+      citationSettings: args.citationSettings,
+    });
+  },
+});
+
+/// Updates only the AI prompt settings on the thesis metadata singleton.
+/// Separate from upsertMetadata so the AI prompts panel can auto-save
+/// without requiring all mandatory metadata fields.
+export const updateAiPromptSettings = mutation({
+  args: { aiPromptSettings: aiPromptSettingsValidator },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.query("thesisMetadata").collect();
+
+    if (existing.length > 0) {
+      await ctx.db.patch(existing[0]._id, {
+        aiPromptSettings: args.aiPromptSettings,
+      });
+      return existing[0]._id;
+    }
+
+    // Create a minimal metadata doc if none exists yet.
+    return await ctx.db.insert("thesisMetadata", {
+      studentName: "",
+      titleDE: "",
+      aiPromptSettings: args.aiPromptSettings,
     });
   },
 });

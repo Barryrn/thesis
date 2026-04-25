@@ -120,7 +120,8 @@ export default function Dashboard() {
   const triggerCitation = useCallback(
     async (paperId: PaperId, sectionIds: SectionId[]) => {
       const paper = papers.find((p) => p._id === paperId);
-      if (!paper?.fileUrl) return;
+      // Allow citation if paper has a PDF or pasted manual content
+      if (!paper?.fileUrl && !paper?.manualContent) return;
 
       // Show spinner on each target section
       setCitingSections((prev) => new Set([...prev, ...sectionIds]));
@@ -131,7 +132,7 @@ export default function Dashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             paperId,
-            fileUrl: paper.fileUrl,
+            fileUrl: paper.fileUrl || "",
             sectionIds,
             // Pass full section objects so the backend can filter and score
             sections: sections.map((s) => ({

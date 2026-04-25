@@ -103,6 +103,35 @@ export const updatePaperNotes = mutation({
   },
 });
 
+/// Updates the pasted text content for a manual source and clears the
+/// summarization timestamp so the UI knows the summary is stale.
+export const updateManualContent = mutation({
+  args: {
+    paperId: v.id("papers"),
+    manualContent: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.paperId, {
+      manualContent: args.manualContent || undefined,
+      manualContentSummarizedAt: undefined,
+    });
+  },
+});
+
+/// Sets the manualContentSummarizedAt timestamp after a successful summarization.
+/// Called by the Python backend when /process-manual completes.
+export const setManualContentSummarizedAt = mutation({
+  args: {
+    paperId: v.id("papers"),
+    manualContentSummarizedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.paperId, {
+      manualContentSummarizedAt: args.manualContentSummarizedAt,
+    });
+  },
+});
+
 // ===== QUERIES =====
 
 export const getPaper = query({
@@ -116,6 +145,18 @@ export const listPapers = query({
   args: {},
   handler: async (ctx) => {
     return await ctx.db.query("papers").order("desc").collect();
+  },
+});
+
+/// Returns paperId and zoteroItemKey for all Zotero-imported papers.
+/// Used by the ZoteroImport browser to identify which items are already imported.
+export const listZoteroKeys = query({
+  args: {},
+  handler: async (ctx) => {
+    const papers = await ctx.db.query("papers").collect();
+    return papers
+      .filter((p) => p.zoteroItemKey)
+      .map((p) => ({ _id: p._id, zoteroItemKey: p.zoteroItemKey! }));
   },
 });
 

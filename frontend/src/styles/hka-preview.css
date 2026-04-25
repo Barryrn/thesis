@@ -261,6 +261,20 @@
   font-size: 10pt;
 }
 
+/* ── Inline citation styles (numbered [1] and Author-Year) ───────── */
+
+.citation-numbered {
+  font-size: inherit;
+  color: #1a1a1a;
+  font-weight: normal;
+}
+
+.citation-author-year {
+  font-size: inherit;
+  color: #1a1a1a;
+  font-weight: normal;
+}
+
 /* ── Orphan markers ───────────────────────────────────────────────── */
 
 .orphan-marker {

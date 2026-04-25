@@ -6,12 +6,14 @@
 import { useCallback, useState } from "react";
 import { RotateCcw, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { LayoutSettings } from "@/lib/documentCompiler";
-import { DEFAULT_LAYOUT, MARGIN_PRESETS } from "@/lib/documentCompiler";
+import type { LayoutSettings, CitationSettings } from "@/lib/documentCompiler";
+import { DEFAULT_LAYOUT, DEFAULT_CITATION, MARGIN_PRESETS } from "@/lib/documentCompiler";
 
 interface LayoutSettingsPanelProps {
   layoutSettings: LayoutSettings;
+  citationSettings: CitationSettings;
   onChange: (settings: LayoutSettings) => void;
+  onCitationChange: (settings: CitationSettings) => void;
   onReset: () => void;
 }
 
@@ -32,8 +34,8 @@ function activeMarginPreset(margins: LayoutSettings["margins"]): string {
   return "Custom";
 }
 
-/// True when every field matches the HKA default.
-function isDefault(settings: LayoutSettings): boolean {
+/// True when every layout field matches the HKA default.
+function isLayoutDefault(settings: LayoutSettings): boolean {
   return (
     settings.fontSize === DEFAULT_LAYOUT.fontSize &&
     settings.lineSpacing === DEFAULT_LAYOUT.lineSpacing &&
@@ -47,6 +49,21 @@ function isDefault(settings: LayoutSettings): boolean {
   );
 }
 
+/// True when every citation field matches the HKA default.
+function isCitationDefault(settings: CitationSettings): boolean {
+  return (
+    settings.style === DEFAULT_CITATION.style &&
+    settings.ordering === DEFAULT_CITATION.ordering
+  );
+}
+
+/// Style-aware default ordering for each citation style.
+const STYLE_DEFAULT_ORDERING: Record<CitationSettings["style"], CitationSettings["ordering"]> = {
+  hkaFootnote: "alphabetical",
+  numbered: "appearance",
+  authorYear: "alphabetical",
+};
+
 /// Shared CSS classes for small number inputs.
 const INPUT_CLASS =
   "w-full rounded-md border border-border/40 bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-amber/40";
@@ -55,10 +72,13 @@ const INPUT_CLASS =
 
 export default function LayoutSettingsPanel({
   layoutSettings,
+  citationSettings,
   onChange,
+  onCitationChange,
   onReset,
 }: LayoutSettingsPanelProps) {
-  const presetLabel = isDefault(layoutSettings) ? "HKA Standard" : "Custom";
+  const allDefault = isLayoutDefault(layoutSettings) && isCitationDefault(citationSettings);
+  const presetLabel = allDefault ? "HKA Standard" : "Custom";
   const [marginsExpanded, setMarginsExpanded] = useState(false);
 
   const update = useCallback(
@@ -275,13 +295,51 @@ export default function LayoutSettingsPanel({
         />
       </Section>
 
+      {/* ── Citations ─────────────────────────────────────────────── */}
+      <Section label="Citations">
+        {/* Citation Style */}
+        <label className="text-[10px] text-muted-foreground">Style</label>
+        <SegmentedControl
+          options={["hkaFootnote", "numbered", "authorYear"] as const}
+          value={citationSettings.style}
+          onChange={(v) => {
+            // When switching style, auto-set the style-aware default ordering
+            const newOrdering = STYLE_DEFAULT_ORDERING[v as CitationSettings["style"]];
+            onCitationChange({ style: v as CitationSettings["style"], ordering: newOrdering });
+          }}
+          format={(v) =>
+            v === "hkaFootnote"
+              ? "HKA"
+              : v === "numbered"
+                ? "[1]"
+                : "Author"
+          }
+        />
+
+        {/* Bibliography Ordering */}
+        <label className="text-[10px] text-muted-foreground mt-2 block">
+          Bibliography Order
+        </label>
+        <SegmentedControl
+          options={["alphabetical", "appearance"] as const}
+          value={citationSettings.ordering}
+          onChange={(v) =>
+            onCitationChange({
+              ...citationSettings,
+              ordering: v as CitationSettings["ordering"],
+            })
+          }
+          format={(v) => (v === "alphabetical" ? "A–Z" : "By Use")}
+        />
+      </Section>
+
       {/* ── Reset button ───────────────────────────────────────────── */}
       <Button
         variant="ghost"
         size="sm"
         className="w-full text-xs text-muted-foreground"
         onClick={onReset}
-        disabled={isDefault(layoutSettings)}
+        disabled={allDefault}
       >
         <RotateCcw className="size-3 mr-1" />
         Reset to HKA Standard

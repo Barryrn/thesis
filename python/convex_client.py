@@ -114,7 +114,7 @@ def save_summary(paper_id: str, summary: dict, language: str = "en"):
     Stores the language used during generation so the /cite endpoint can
     produce excerpts in the same language as the document's summary.
     """
-    return _mutation("summaries:createSummary", {
+    return _mutation("summaries:upsertSummary", {
         "paperId": paper_id,
         "researchQuestion": summary["researchQuestion"],
         "methodology": summary["methodology"],
@@ -122,6 +122,22 @@ def save_summary(paper_id: str, summary: dict, language: str = "en"):
         "keywords": summary["keywords"],
         "rawSummary": summary["rawSummary"],
         "language": language,
+    })
+
+
+def get_paper(paper_id: str) -> dict | None:
+    """Fetch a paper record by ID. Used by /cite to read manualContent."""
+    result = _query("papers:getPaper", {"paperId": paper_id})
+    return result.get("value")
+
+
+def set_manual_content_summarized_at(paper_id: str):
+    """Mark the current time as when manual content was last summarized."""
+    import time
+
+    return _mutation("papers:setManualContentSummarizedAt", {
+        "paperId": paper_id,
+        "manualContentSummarizedAt": int(time.time() * 1000),
     })
 
 

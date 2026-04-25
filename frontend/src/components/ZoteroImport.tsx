@@ -8,10 +8,12 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useQuery } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Trash2, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useLanguage } from "@/lib/LanguageContext";
 import { useProvider } from "@/lib/ProviderContext";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
@@ -43,12 +45,23 @@ export default function ZoteroImport() {
   const [showLogs, setShowLogs] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
+  const [deleteMenuKey, setDeleteMenuKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+
   const { language } = useLanguage();
   const { provider } = useProvider();
 
   // Existing DOIs for duplicate detection
   const existingDOIs = useQuery(api.summaries.listAllDOIs) ?? [];
   const existingDOISet = new Set(existingDOIs.map((d) => d.doi.toLowerCase()));
+
+  // Imported Zotero keys → paperId map for delete actions
+  const zoteroKeys = useQuery(api.papers.listZoteroKeys) ?? [];
+  const importedKeyMap = new Map(
+    zoteroKeys.map((k) => [k.zoteroItemKey, k._id])
+  );
+
+  const deletePaper = useMutation(api.papers.deletePaper);
 
   // Existing outline sections for the /process pipeline
   const sections = useQuery(api.outline.listSections) ?? [];
@@ -133,6 +146,59 @@ export default function ZoteroImport() {
       setSelectedItems(new Set());
     } else {
       setSelectedItems(new Set(items.map((i) => i.key)));
+    }
+  }
+
+  // --- Delete imported items ---
+
+  /// Removes an imported item from this project only.
+  async function handleDeleteFromProject(zoteroItemKey: string) {
+    const paperId = importedKeyMap.get(zoteroItemKey);
+    if (!paperId) return;
+
+    setDeletingKey(zoteroItemKey);
+    try {
+      await deletePaper({ paperId });
+      toast.success("Aus Projekt entfernt");
+      setDeleteMenuKey(null);
+    } catch (err) {
+      toast.error(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setDeletingKey(null);
+    }
+  }
+
+  /// Deletes an item from Zotero and then from this project.
+  async function handleDeleteFromZotero(zoteroItemKey: string) {
+    const paperId = importedKeyMap.get(zoteroItemKey);
+    if (!paperId) return;
+
+    setDeletingKey(zoteroItemKey);
+    try {
+      const res = await fetch(
+        `${PYTHON_SERVICE_URL}/zotero/item/${zoteroItemKey}`,
+        { method: "DELETE" }
+      );
+
+      if (res.status === 403) {
+        const err = await res.json();
+        toast.error(err.detail ?? "Zotero API-Schlüssel hat keine Löschberechtigung");
+        return;
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        toast.error(`Zotero-Löschung fehlgeschlagen: ${err.detail}`);
+        return;
+      }
+
+      await deletePaper({ paperId });
+      toast.success("Aus Zotero und Projekt gelöscht");
+      setDeleteMenuKey(null);
+    } catch (err) {
+      toast.error(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setDeletingKey(null);
     }
   }
 
@@ -317,39 +383,93 @@ export default function ZoteroImport() {
               {items.map((item) => {
                 const isDuplicate =
                   item.doi && existingDOISet.has(item.doi.toLowerCase());
+                const isImported = importedKeyMap.has(item.key);
+                const isDeleting = deletingKey === item.key;
+                const showMenu = deleteMenuKey === item.key;
+
                 return (
-                  <label
+                  <div
                     key={item.key}
-                    className="flex items-start gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
+                    className="flex items-start gap-3 px-3 py-2 hover:bg-muted/50 border-b last:border-b-0 relative"
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedItems.has(item.key)}
-                      onChange={() => toggleItem(item.key)}
-                      className="accent-primary mt-1"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {item.title}
-                        </span>
-                        {item.hasPdf && (
-                          <Badge className="text-[10px] bg-blue-500/20 text-blue-600 shrink-0">
-                            PDF
-                          </Badge>
-                        )}
-                        {isDuplicate && (
-                          <Badge className="text-[10px] bg-amber-500/20 text-amber-600 shrink-0">
-                            Already imported
-                          </Badge>
+                    <label className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedItems.has(item.key)}
+                        onChange={() => toggleItem(item.key)}
+                        className="accent-primary mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">
+                            {item.title}
+                          </span>
+                          {item.hasPdf && (
+                            <Badge className="text-[10px] bg-blue-500/20 text-blue-600 shrink-0">
+                              PDF
+                            </Badge>
+                          )}
+                          {isImported && (
+                            <Badge className="text-[10px] bg-green-500/20 text-green-600 shrink-0">
+                              Importiert
+                            </Badge>
+                          )}
+                          {!isImported && isDuplicate && (
+                            <Badge className="text-[10px] bg-amber-500/20 text-amber-600 shrink-0">
+                              Already imported
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {item.authors.join("; ")}
+                          {item.year ? ` (${item.year})` : ""}
+                        </p>
+                      </div>
+                    </label>
+
+                    {/* Delete actions for imported items */}
+                    {isImported && (
+                      <div className="relative shrink-0 mt-0.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteMenuKey(showMenu ? null : item.key);
+                          }}
+                          className="text-muted-foreground hover:text-destructive p-1 rounded-md hover:bg-muted/20 transition-colors"
+                          title="Löschen"
+                        >
+                          {isDeleting ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-3.5" />
+                          )}
+                        </button>
+
+                        {showMenu && !isDeleting && (
+                          <div className="absolute right-0 top-7 z-20 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px]">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteFromProject(item.key);
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 text-foreground"
+                            >
+                              Aus Projekt entfernen
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteFromZotero(item.key);
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-xs hover:bg-destructive/10 text-red-500"
+                            >
+                              Aus Zotero löschen
+                            </button>
+                          </div>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {item.authors.join("; ")}
-                        {item.year ? ` (${item.year})` : ""}
-                      </p>
-                    </div>
-                  </label>
+                    )}
+                  </div>
                 );
               })}
             </div>

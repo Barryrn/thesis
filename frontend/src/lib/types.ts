@@ -192,6 +192,31 @@ export interface ZoteroImportResult {
 /// AI text optimization modes available in the write tab toolbar.
 export type OptimizeMode = "enhance" | "formalize" | "simplify" | "expand";
 
+/// Global user-editable prompt overrides per optimization mode.
+/// Stored on thesisMetadata.aiPromptSettings.
+export type AiPromptSettings = {
+  enhance?: string;
+  formalize?: string;
+  simplify?: string;
+  expand?: string;
+};
+
+/// Per-section override for a single optimization mode.
+/// `prompt` fully replaces the base; `extraContext` appends to the base.
+export type AiPromptOverride = {
+  prompt?: string;
+  extraContext?: string;
+};
+
+/// Per-section AI prompt overrides for all modes.
+/// Stored on sectionContent.aiPromptOverrides.
+export type AiPromptOverrides = {
+  enhance?: AiPromptOverride;
+  formalize?: AiPromptOverride;
+  simplify?: AiPromptOverride;
+  expand?: AiPromptOverride;
+};
+
 /// Maps processingStep values to user-friendly labels shown during paper processing.
 export const PROCESSING_STEP_LABELS: Record<string, string> = {
   downloading: "Downloading...",

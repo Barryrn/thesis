@@ -20,6 +20,30 @@ export const createSummary = mutation({
   },
 });
 
+/// Upserts a summary for a paper — deletes the existing one (if any) before
+/// inserting. Prevents duplicate summaries when re-summarizing manual sources.
+export const upsertSummary = mutation({
+  args: {
+    paperId: v.id("papers"),
+    researchQuestion: v.string(),
+    methodology: v.string(),
+    keyFindings: v.array(v.string()),
+    keywords: v.array(v.string()),
+    rawSummary: v.string(),
+    language: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("summaries")
+      .withIndex("by_paper", (q) => q.eq("paperId", args.paperId))
+      .first();
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+    return await ctx.db.insert("summaries", args);
+  },
+});
+
 export const createIdentifiers = mutation({
   args: {
     paperId: v.id("papers"),

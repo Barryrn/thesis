@@ -7,11 +7,13 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { api } from "../../convex/_generated/api";
-import { Search, ArrowDownWideNarrow, RotateCcw } from "lucide-react";
+import { Search, ArrowDownWideNarrow, RotateCcw, Plus } from "lucide-react";
 import LibraryPaperCard from "./LibraryPaperCard";
 import GroupsSection from "./GroupsSection";
+import SourceEditSheet from "./SourceEditSheet";
 
 type StatusFilter = "all" | "unassigned" | "processing" | "completed";
+type SourceFilter = "all" | "zotero" | "manual";
 type SortMode = "alphabetical" | "manual";
 
 const filterTabs: { key: StatusFilter; label: string }[] = [
@@ -40,8 +42,10 @@ export default function DocumentLibrary({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("alphabetical");
   const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(null);
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
 
   const unassignedIds = useMemo(
     () => new Set(unassigned.map((p) => p._id)),
@@ -70,6 +74,7 @@ export default function DocumentLibrary({
   const isFiltered =
     searchQuery.trim() !== "" ||
     statusFilter !== "all" ||
+    sourceFilter !== "all" ||
     selectedGroupId !== null;
 
   const filteredPapers = useMemo(() => {
@@ -100,6 +105,13 @@ export default function DocumentLibrary({
         break;
     }
 
+    // Source filter (Zotero vs Manual).
+    if (sourceFilter === "zotero") {
+      result = result.filter((p) => !!p.zoteroItemKey);
+    } else if (sourceFilter === "manual") {
+      result = result.filter((p) => !p.zoteroItemKey);
+    }
+
     // Group filter (AND-combined with status filter above).
     if (selectedGroupId !== null) {
       result = result.filter((p) =>
@@ -121,7 +133,7 @@ export default function DocumentLibrary({
     }
 
     return sorted;
-  }, [papers, searchQuery, statusFilter, unassignedIds, sortMode, isFiltered, selectedGroupId, membershipsByPaper]);
+  }, [papers, searchQuery, statusFilter, sourceFilter, unassignedIds, sortMode, isFiltered, selectedGroupId, membershipsByPaper]);
 
   const hasManualOrder = papers.some(
     (p) => p.libraryDisplayOrder !== undefined
@@ -146,9 +158,18 @@ export default function DocumentLibrary({
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-border/50">
-        <h2 className="heading-serif text-base text-foreground mb-3">
-          Documents
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="heading-serif text-base text-foreground">
+            Documents
+          </h2>
+          <button
+            onClick={() => setAddSourceOpen(true)}
+            className="text-[11px] px-2.5 py-1 rounded-md bg-amber text-background hover:bg-amber/90 transition-colors flex items-center gap-1 font-medium"
+          >
+            <Plus className="size-3" />
+            Neue Quelle
+          </button>
+        </div>
 
         {/* Search */}
         <div className="relative">
@@ -188,6 +209,29 @@ export default function DocumentLibrary({
               {tab.key === "unassigned" && unassigned.length > 0 && (
                 <span className="ml-1 text-amber-dim">{unassigned.length}</span>
               )}
+            </button>
+          ))}
+        </div>
+
+        {/* Source filter (Zotero / Manual) */}
+        <div className="flex gap-1 mt-1.5">
+          {([
+            { key: "all" as SourceFilter, label: "Alle Quellen" },
+            { key: "zotero" as SourceFilter, label: "Zotero" },
+            { key: "manual" as SourceFilter, label: "Manuell" },
+          ]).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setSourceFilter(tab.key)}
+              className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
+                sourceFilter === tab.key
+                  ? tab.key === "zotero"
+                    ? "bg-blue-500/15 text-blue-500"
+                    : "bg-amber/15 text-amber"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
+            >
+              {tab.label}
             </button>
           ))}
         </div>
@@ -271,6 +315,13 @@ export default function DocumentLibrary({
           ))
         )}
       </div>
+
+      {/* Manual source creation sheet */}
+      <SourceEditSheet
+        open={addSourceOpen}
+        onOpenChange={setAddSourceOpen}
+        source={null}
+      />
     </div>
   );
 }

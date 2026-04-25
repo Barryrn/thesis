@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma } from "lucide-react";
+import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2 } from "lucide-react";
 import CitationPicker from "./CitationPicker";
+import SectionPromptEditor from "./SectionPromptEditor";
 import FormulaPreviewPanel from "./FormulaPreviewPanel";
 import FigurePanel from "./FigurePanel";
 import {
@@ -23,9 +24,11 @@ import {
   getSelectionRangeInRawText,
 } from "@/lib/contentEditableUtils";
 import { useTextOptimize } from "@/hooks/useTextOptimize";
+import { useBaselinePrompts } from "@/hooks/useBaselinePrompts";
+import { resolvePrompt } from "@/lib/promptResolver";
 import { useLanguage } from "@/lib/LanguageContext";
 import { useProvider } from "@/lib/ProviderContext";
-import type { ActiveSection, CitationType, OptimizeMode } from "@/lib/types";
+import type { ActiveSection, CitationType, OptimizeMode, AiPromptSettings, AiPromptOverrides } from "@/lib/types";
 import "katex/dist/katex.min.css";
 import type { Doc } from "../../convex/_generated/dataModel";
 
@@ -51,6 +54,12 @@ export default function SectionWriteEditor({
     useQuery(api.matches.getMatchesBySection, { sectionId }) ?? [];
   const saveMutation = useMutation(api.sectionContent.saveSectionContent);
 
+  // ── AI prompt customization queries ───────────────────────────────────
+  const metadata = useQuery(api.thesisMetadata.getMetadata);
+  const { baselines } = useBaselinePrompts();
+  const updatePromptOverrides = useMutation(api.sectionContent.updateAiPromptOverrides);
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
+
   // ── Local state ───────────────────────────────────────────────────────
   const [body, setBody] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
@@ -67,13 +76,27 @@ export default function SectionWriteEditor({
   const { language } = useLanguage();
   const { provider } = useProvider();
 
+  /// Resolves the custom prompt for a given mode at request time,
+  /// applying the two-tier override chain: baseline → global → section.
+  const getCustomPrompt = useCallback(
+    (mode: OptimizeMode): string | undefined => {
+      return resolvePrompt(
+        mode,
+        baselines,
+        metadata?.aiPromptSettings as AiPromptSettings | undefined,
+        content?.aiPromptOverrides as AiPromptOverrides | undefined,
+      );
+    },
+    [baselines, metadata?.aiPromptSettings, content?.aiPromptOverrides]
+  );
+
   // AI text optimization hook
   const {
     state: optimizeState,
     requestOptimize,
     acceptOptimize,
     discardOptimize,
-  } = useTextOptimize(body, language, provider);
+  } = useTextOptimize(body, language, provider, getCustomPrompt);
 
   // Citation picker state
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -561,6 +584,13 @@ export default function SectionWriteEditor({
               {label}
             </button>
           ))}
+          <button
+            onClick={() => setPromptEditorOpen(true)}
+            className="text-[11px] px-1.5 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors ml-1"
+            title="Customize AI prompts for this section"
+          >
+            <Settings2 className="size-3" />
+          </button>
         </div>
       )}
 
@@ -685,6 +715,22 @@ export default function SectionWriteEditor({
           </ol>
         </div>
       )}
+
+      {/* Per-section AI prompt override editor */}
+      <SectionPromptEditor
+        open={promptEditorOpen}
+        onOpenChange={setPromptEditorOpen}
+        sectionTitle={`${activeSection.orderNumber} ${activeSection.title}`}
+        aiPromptOverrides={content?.aiPromptOverrides as AiPromptOverrides | undefined}
+        globalSettings={metadata?.aiPromptSettings as AiPromptSettings | undefined}
+        baselines={baselines}
+        onChange={(overrides) => {
+          updatePromptOverrides({
+            sectionId,
+            aiPromptOverrides: overrides,
+          });
+        }}
+      />
     </div>
   );
 }

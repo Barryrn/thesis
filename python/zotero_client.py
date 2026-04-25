@@ -328,6 +328,29 @@ def attach_pdf(item_key: str, pdf_path: str, title: str = "Attachment") -> bool:
         return False
 
 
+def delete_item(item_key: str) -> None:
+    """Delete an item from the user's Zotero library.
+
+    Fetches the item first to obtain its version (required by the Zotero API
+    for delete operations). Raises PermissionError when the API key lacks
+    delete permissions (HTTP 403).
+    """
+    logger = get_logger()
+    zot = get_client()
+    try:
+        item = zot.item(item_key)
+        zot.delete_item(item)
+        logger.info(f"[ZOTERO] Deleted item {item_key}")
+    except Exception as e:
+        error_str = str(e)
+        if "403" in error_str:
+            raise PermissionError(
+                "Zotero API key lacks delete permission — "
+                "update at zotero.org/settings/keys"
+            ) from e
+        raise RuntimeError(f"Failed to delete Zotero item: {e}") from e
+
+
 def _parse_author_for_zotero(name: str) -> dict:
     """Parse an author name string into Zotero creator format.
 

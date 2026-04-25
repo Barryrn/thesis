@@ -49,6 +49,54 @@ export const saveSectionContent = mutation({
   },
 });
 
+/// Validator for per-mode AI prompt override (prompt replacement + extra context).
+const aiPromptOverrideValidator = v.optional(
+  v.object({
+    prompt: v.optional(v.string()),
+    extraContext: v.optional(v.string()),
+  })
+);
+
+/// Validator for the full per-section AI prompt overrides object.
+const aiPromptOverridesValidator = v.object({
+  enhance: aiPromptOverrideValidator,
+  formalize: aiPromptOverrideValidator,
+  simplify: aiPromptOverrideValidator,
+  expand: aiPromptOverrideValidator,
+});
+
+/// Updates only the AI prompt overrides for a section's content.
+/// Decoupled from saveSectionContent so prompt edits save instantly
+/// without interfering with the debounced body-text autosave.
+export const updateAiPromptOverrides = mutation({
+  args: {
+    sectionId: v.id("outlineSections"),
+    aiPromptOverrides: aiPromptOverridesValidator,
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("sectionContent")
+      .withIndex("by_section", (q) => q.eq("sectionId", args.sectionId))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        aiPromptOverrides: args.aiPromptOverrides,
+      });
+      return existing._id;
+    }
+
+    // Create a minimal content doc if the user configures prompts before writing.
+    return await ctx.db.insert("sectionContent", {
+      sectionId: args.sectionId,
+      body: "",
+      citedPaperIds: [],
+      updatedAt: Date.now(),
+      aiPromptOverrides: args.aiPromptOverrides,
+    });
+  },
+});
+
 // ===== MIGRATION =====
 
 /// One-time migration: rewrites old-format citation markers to the new HKA format.

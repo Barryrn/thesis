@@ -32,6 +32,20 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   pageNumbering: { position: "header", format: "automatic", startPage: 1 },
 };
 
+// ── Citation Settings ───────────────────────────────────────────────
+
+/// User-configurable citation style and bibliography ordering.
+export interface CitationSettings {
+  style: "hkaFootnote" | "numbered" | "authorYear";
+  ordering: "alphabetical" | "appearance";
+}
+
+/// HKA Kürzel footnote style with alphabetical bibliography ordering.
+export const DEFAULT_CITATION: CitationSettings = {
+  style: "hkaFootnote",
+  ordering: "alphabetical",
+};
+
 /// Named margin presets for the settings panel dropdown.
 export const MARGIN_PRESETS: Record<string, LayoutSettings["margins"]> = {
   "HKA Standard": { top: 2.5, bottom: 2.5, left: 3, right: 2.5 },
@@ -71,6 +85,7 @@ export interface ThesisMetadata {
   keywordsDE?: string[];
   keywordsEN?: string[];
   layoutSettings?: LayoutSettings;
+  citationSettings?: CitationSettings;
 }
 
 export interface OutlineSectionDoc {
@@ -109,6 +124,8 @@ export interface CompiledDocument {
   declarationText: string;
   /// Resolved layout settings (never undefined — defaults merged in).
   layoutSettings: LayoutSettings;
+  /// Resolved citation settings (never undefined — defaults merged in).
+  citationSettings: CitationSettings;
 }
 
 export interface TitlePageData {
@@ -156,6 +173,8 @@ export interface FootnoteRenderEntry {
 export interface BibliographyEntry {
   kuerzel: string;
   formattedText: string;
+  /// Paper ID used for appearance-order lookups and numbered-style mapping.
+  paperId: string;
 }
 
 // ── HKA Eidesstattliche Erklärung ────────────────────────────────────
@@ -175,6 +194,12 @@ export function compileDocument(data: DocumentData): CompiledDocument {
     ...rawLayout,
     margins: { ...DEFAULT_LAYOUT.margins, ...rawLayout?.margins },
     pageNumbering: { ...DEFAULT_LAYOUT.pageNumbering, ...rawLayout?.pageNumbering },
+  };
+
+  // Resolve citation settings: merge user overrides over HKA defaults.
+  const citationSettings: CitationSettings = {
+    ...DEFAULT_CITATION,
+    ...metadata?.citationSettings,
   };
 
   const titlePage: TitlePageData = {
@@ -224,8 +249,53 @@ export function compileDocument(data: DocumentData): CompiledDocument {
     }
   }
 
-  // Compile each section, threading a global footnote counter (continuous 1..N)
-  // and per-chapter equation counters (e.g. (2.1), (2.2), (3.1)).
+  // ── Two-pass compilation ─────────────────────────────────────────────
+  // Pass 1: Collect all unique source IDs in order of first appearance
+  // (needed for numbered/appearance-ordered citation styles).
+  const appearanceOrder = new Map<string, number>();
+  let appearanceCounter = 1;
+  for (const section of sortedSections) {
+    const body = data.sectionContents.get(section._id) ?? "";
+    const citations = parseCitations(body);
+    for (const c of citations) {
+      if (!appearanceOrder.has(c.paperId)) {
+        appearanceOrder.set(c.paperId, appearanceCounter++);
+      }
+      if (c.secondaryPaperId && !appearanceOrder.has(c.secondaryPaperId)) {
+        appearanceOrder.set(c.secondaryPaperId, appearanceCounter++);
+      }
+    }
+  }
+
+  // For the numbered style, compute the final paperId→number mapping based
+  // on the chosen ordering. When ordering is "alphabetical", numbers are
+  // assigned alphabetically so that inline [1] matches bibliography [1].
+  let numberedMap = appearanceOrder;
+  if (citationSettings.style === "numbered" && citationSettings.ordering === "alphabetical") {
+    // Build alphabetically-sorted entries to assign stable numbers
+    const alphaEntries: Array<{ paperId: string; sortKey: string }> = [];
+    for (const src of data.sources) {
+      const paper = data.papers.get(src.paperId);
+      if (!paper) continue;
+      // Only include sources that are actually cited
+      if (!appearanceOrder.has(src.paperId)) continue;
+      const authorStr = formatAuthors(paper.authors);
+      const yearStr = paper.year ? `(${paper.year})` : "(o.J.)";
+      alphaEntries.push({
+        paperId: src.paperId,
+        sortKey: `${authorStr} ${yearStr}. ${paper.title}`,
+      });
+    }
+    alphaEntries.sort((a, b) =>
+      a.sortKey.localeCompare(b.sortKey, "de", { sensitivity: "base" })
+    );
+    numberedMap = new Map<string, number>();
+    alphaEntries.forEach((e, i) => numberedMap.set(e.paperId, i + 1));
+  }
+
+  // Pass 2: Compile each section with style-aware rendering, threading
+  // a global footnote counter (continuous 1..N) and per-chapter equation
+  // counters (e.g. (2.1), (2.2), (3.1)).
   let globalFootnoteCounter = 1;
   const equationCounters = new Map<string, number>();
   const mainSections = sortedSections.map((section) => {
@@ -239,6 +309,8 @@ export function compileDocument(data: DocumentData): CompiledDocument {
       figureNumbers,
       data.figureUrls,
       data.papers,
+      citationSettings,
+      numberedMap,
       globalFootnoteCounter,
       section.orderNumber,
       eqStart
@@ -256,7 +328,12 @@ export function compileDocument(data: DocumentData): CompiledDocument {
     };
   });
 
-  const bibliography = generateBibliography(data.sources, data.papers);
+  const bibliography = generateBibliography(
+    data.sources,
+    data.papers,
+    citationSettings,
+    appearanceOrder
+  );
 
   return {
     titlePage,
@@ -270,6 +347,7 @@ export function compileDocument(data: DocumentData): CompiledDocument {
     bibliography,
     declarationText: DECLARATION_TEXT,
     layoutSettings,
+    citationSettings,
   };
 }
 
@@ -322,8 +400,9 @@ export function generateListOfFigures(
 // ── Section body rendering ───────────────────────────────────────────
 
 /// Renders a section body to HTML, replacing citation/figure/formula markers.
-/// Accepts optional counters so the caller can thread global/per-chapter state
-/// across sections for continuous footnote numbering and per-chapter equation numbering.
+/// Accepts citation settings to render citations in the selected style (HKA
+/// footnotes, numbered [1], or Author-Year). Threads global/per-chapter
+/// counters across sections.
 export function renderSectionToHtml(
   body: string,
   sourceMap: Map<string, Doc<"sources">>,
@@ -331,6 +410,8 @@ export function renderSectionToHtml(
   figureNumbers: Map<string, number>,
   figureUrls: Map<string, string>,
   papers: Map<string, PaperDoc>,
+  citationSettings: CitationSettings,
+  appearanceOrder: Map<string, number>,
   startingFootnoteNumber?: number,
   sectionOrderNumber?: string,
   startingEquationNumber?: number
@@ -354,7 +435,7 @@ export function renderSectionToHtml(
 
   const segments: Segment[] = [];
 
-  // 1. Citations
+  // 1. Citations — style-aware rendering
   const citations = parseCitations(body);
   for (const c of citations) {
     // Find the first unclaimed occurrence of this citation marker
@@ -362,7 +443,6 @@ export function renderSectionToHtml(
     const re = new RegExp(escapeRegex(c.fullMatch), "g");
     let m: RegExpExecArray | null;
     while ((m = re.exec(body)) !== null) {
-      // Check if this position is already claimed by another segment
       const alreadyClaimed = segments.some(
         (s) => m!.index >= s.start && m!.index < s.end
       );
@@ -375,23 +455,78 @@ export function renderSectionToHtml(
     if (pos >= 0) {
       const source = sourceMap.get(c.paperId);
       const kuerzel = source?.kuerzel ?? "??";
+      const paper = papers.get(c.paperId);
       const prefix = c.citationType === "indirect" ? "Vgl. " : "";
+      const vglPrefix = c.citationType === "indirect" ? "vgl. " : "";
 
-      let footnoteText: string;
-      if (c.secondaryPaperId && c.secondaryPageRef) {
-        const secSource = sourceMap.get(c.secondaryPaperId);
-        const secKuerzel = secSource?.kuerzel ?? "??";
-        footnoteText = `${prefix}${kuerzel}, ${c.pageRef} zitiert nach ${secKuerzel}, ${c.secondaryPageRef}.`;
-      } else {
-        footnoteText = `${prefix}${kuerzel}, ${c.pageRef}.`;
+      let replacement: string;
+
+      switch (citationSettings.style) {
+        case "hkaFootnote": {
+          // HKA Kürzel footnote: superscript number → footnote at page bottom
+          let footnoteText: string;
+          if (c.secondaryPaperId && c.secondaryPageRef) {
+            const secSource = sourceMap.get(c.secondaryPaperId);
+            const secKuerzel = secSource?.kuerzel ?? "??";
+            footnoteText = `${prefix}${kuerzel}, ${c.pageRef} zitiert nach ${secKuerzel}, ${c.secondaryPageRef}.`;
+          } else {
+            footnoteText = `${prefix}${kuerzel}, ${c.pageRef}.`;
+          }
+          const num = footnoteCounter++;
+          footnotes.push({ number: num, text: footnoteText });
+          replacement = `<sup class="footnote-ref">${num}</sup>`;
+          break;
+        }
+
+        case "numbered": {
+          // Numbered [1] style: inline bracket with appearance-order number
+          const refNum = appearanceOrder.get(c.paperId) ?? 0;
+          let inlineText: string;
+          if (c.secondaryPaperId && c.secondaryPageRef) {
+            const secNum = appearanceOrder.get(c.secondaryPaperId) ?? 0;
+            inlineText = c.citationType === "direct"
+              ? `[${refNum}, ${c.pageRef}, zitiert nach ${secNum}]`
+              : `[${refNum}, zitiert nach ${secNum}]`;
+          } else if (c.citationType === "direct") {
+            inlineText = `[${refNum}, ${c.pageRef}]`;
+          } else {
+            inlineText = `[${refNum}]`;
+          }
+          replacement = `<span class="citation-numbered">${escapeHtml(inlineText)}</span>`;
+          break;
+        }
+
+        case "authorYear": {
+          // Author-Year (Müller, 2020) style
+          const authorSurname = paper?.authors[0]
+            ? paper.authors[0].trim().split(/\s+/).pop()
+            : "??";
+          const yearStr = paper?.year ? String(paper.year) : "o.J.";
+
+          let inlineText: string;
+          if (c.secondaryPaperId && c.secondaryPageRef) {
+            const secPaper = papers.get(c.secondaryPaperId);
+            const secSurname = secPaper?.authors[0]
+              ? secPaper.authors[0].trim().split(/\s+/).pop()
+              : "??";
+            const secYear = secPaper?.year ? String(secPaper.year) : "o.J.";
+            inlineText = c.citationType === "direct"
+              ? `(${vglPrefix}${authorSurname}, ${yearStr}, ${c.pageRef}, zitiert nach ${secSurname}, ${secYear}, ${c.secondaryPageRef})`
+              : `(${vglPrefix}${authorSurname}, ${yearStr}, zitiert nach ${secSurname}, ${secYear}, ${c.secondaryPageRef})`;
+          } else if (c.citationType === "direct") {
+            inlineText = `(${authorSurname}, ${yearStr}, ${c.pageRef})`;
+          } else {
+            inlineText = `(${vglPrefix}${authorSurname}, ${yearStr})`;
+          }
+          replacement = `<span class="citation-author-year">${escapeHtml(inlineText)}</span>`;
+          break;
+        }
       }
 
-      const num = footnoteCounter++;
-      footnotes.push({ number: num, text: footnoteText });
       segments.push({
         start: pos,
         end: pos + c.fullMatch.length,
-        replacement: `<sup class="footnote-ref">${num}</sup>`,
+        replacement,
         type: "citation",
       });
     }
@@ -489,10 +624,13 @@ export function renderSectionToHtml(
 
 // ── Bibliography ─────────────────────────────────────────────────────
 
-/// Generates sorted bibliography entries from sources and papers.
+/// Generates bibliography entries from sources and papers, formatted and
+/// ordered according to the active citation settings.
 export function generateBibliography(
   sources: Doc<"sources">[],
-  papers: Map<string, PaperDoc>
+  papers: Map<string, PaperDoc>,
+  citationSettings: CitationSettings,
+  appearanceOrder: Map<string, number>
 ): BibliographyEntry[] {
   const entries: BibliographyEntry[] = [];
 
@@ -500,7 +638,9 @@ export function generateBibliography(
     const paper = papers.get(src.paperId);
     if (!paper) continue;
 
-    const kuerzel = src.kuerzel;
+    // Only include sources that are actually cited in the thesis content.
+    if (!appearanceOrder.has(src.paperId)) continue;
+
     const authorStr = formatAuthors(paper.authors);
     const yearStr = paper.year ? `(${paper.year})` : "(o.J.)";
 
@@ -512,11 +652,31 @@ export function generateBibliography(
           text += ` ${src.publisherLocation}: ${src.publisher}.`;
         }
         break;
+      case "bookChapter": {
+        const editors = src.editorNames?.length
+          ? formatAuthors(src.editorNames)
+          : "";
+        if (editors) text += ` In ${editors} (Hrsg.),`;
+        if (src.editorBookTitle) text += ` ${src.editorBookTitle}.`;
+        if (src.publisherLocation && src.publisher) {
+          text += ` ${src.publisherLocation}: ${src.publisher}.`;
+        }
+        if (src.pageStart) {
+          text += src.pageEnd
+            ? ` S. ${src.pageStart}-${src.pageEnd}.`
+            : ` S. ${src.pageStart}.`;
+        }
+        break;
+      }
       case "journalArticle":
         if (src.journalName) text += ` ${src.journalName}.`;
         if (src.volume) text += ` Jahrgang ${src.volume}`;
         if (src.issue) text += `, Heft ${src.issue}`;
         text += ".";
+        break;
+      case "newspaperArticle":
+        if (src.newspaperName) text += ` ${src.newspaperName}.`;
+        if (src.publishDate) text += ` Ausgabe vom ${src.publishDate}.`;
         break;
       case "internetSource":
         if (src.accessDate) text += ` Abgerufen am ${src.accessDate}`;
@@ -525,13 +685,46 @@ export function generateBibliography(
         break;
     }
 
-    entries.push({ kuerzel, formattedText: text });
+    // Kürzel depends on citation style
+    let kuerzel: string;
+    switch (citationSettings.style) {
+      case "hkaFootnote":
+        kuerzel = src.kuerzel;
+        break;
+      case "numbered":
+        kuerzel = String(appearanceOrder.get(src.paperId) ?? "?");
+        break;
+      case "authorYear":
+        // Author-Year bibliography has no bracket prefix
+        kuerzel = "";
+        break;
+    }
+
+    entries.push({ kuerzel, formattedText: text, paperId: src.paperId });
   }
 
-  // Sort alphabetically by first author surname
-  entries.sort((a, b) =>
-    a.formattedText.localeCompare(b.formattedText, "de", { sensitivity: "base" })
-  );
+  // Sort based on ordering preference
+  if (citationSettings.ordering === "appearance") {
+    // Sort by first-use order using the appearanceOrder map (works for all styles)
+    entries.sort((a, b) => {
+      const orderA = appearanceOrder.get(a.paperId) ?? Infinity;
+      const orderB = appearanceOrder.get(b.paperId) ?? Infinity;
+      return orderA - orderB;
+    });
+  } else {
+    // Alphabetical by formatted text (first author surname)
+    entries.sort((a, b) =>
+      a.formattedText.localeCompare(b.formattedText, "de", { sensitivity: "base" })
+    );
+  }
+
+  // For numbered style, assign sequential numbers based on the final sorted order.
+  // This ensures bibliography numbers match inline references for both ordering modes.
+  if (citationSettings.style === "numbered") {
+    entries.forEach((entry, i) => {
+      entry.kuerzel = String(i + 1);
+    });
+  }
 
   return entries;
 }

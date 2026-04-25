@@ -287,11 +287,69 @@ async def process(req: ProcessRequest):
     return {"status": "ok", "metadataSource": metadata_source}
 
 
+class ProcessManualRequest(BaseModel):
+    """Request body for summarizing pasted text from a manual source."""
+
+    paperId: str
+    text: str
+    language: str = "en"
+    provider: str = "openai"
+
+
+@app.post("/process-manual")
+async def process_manual(req: ProcessManualRequest):
+    """Summarize raw text pasted by the user for a manual source.
+
+    Skips download/extract/identify — goes straight to summarization.
+    Sets manualContentSummarizedAt so the frontend knows the summary is fresh.
+    """
+    set_paper_context(req.paperId)
+    logger = get_logger()
+    logger.info(
+        f"Manual processing started: paper={req.paperId}, text_len={len(req.text)}",
+        extra={"step": "pipeline", "status": "started"},
+    )
+
+    try:
+        await run_in_threadpool(convex_client.update_status, req.paperId, "processing")
+        await run_in_threadpool(convex_client.update_processing_step, req.paperId, "summarizing")
+
+        summary = await run_in_threadpool(
+            summarizer.summarize, req.text, req.language, req.provider
+        )
+
+        await run_in_threadpool(convex_client.update_processing_step, req.paperId, "saving")
+        await run_in_threadpool(
+            convex_client.save_summary, req.paperId, summary, req.language
+        )
+        await run_in_threadpool(
+            convex_client.set_manual_content_summarized_at, req.paperId
+        )
+        await run_in_threadpool(convex_client.update_status, req.paperId, "completed")
+
+        logger.info(
+            "Manual processing completed",
+            extra={"step": "pipeline", "status": "completed"},
+        )
+        return {"status": "ok"}
+
+    except Exception as e:
+        logger.error(
+            f"Manual processing failed: {type(e).__name__}: {e}",
+            extra={"step": "pipeline", "status": "failed"},
+        )
+        try:
+            convex_client.update_status(req.paperId, "failed", str(e))
+        except Exception:
+            pass
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 class CiteRequest(BaseModel):
     """Request body for on-demand per-section citation."""
 
     paperId: str
-    fileUrl: str
+    fileUrl: str = ""
     # IDs of the specific outline sections to cite against.
     sectionIds: list[str]
     # Full section objects from the outline (_id, title, orderNumber, notes).
@@ -325,18 +383,34 @@ async def cite(req: CiteRequest):
             logger.info("No matching sections found, skipping citation", extra={"step": "citation"})
             return {"status": "ok", "matchCount": 0}
 
-        # Download and extract text
-        suffix = _get_suffix(req.fileUrl)
-        with PipelineStep("download_file", detail=f"suffix={suffix}"):
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-                tmp_path = f.name
-            _download_file(req.fileUrl, tmp_path)
+        # Get text: from PDF file or from manual content
+        if req.fileUrl:
+            suffix = _get_suffix(req.fileUrl)
+            with PipelineStep("download_file", detail=f"suffix={suffix}"):
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+                    tmp_path = f.name
+                _download_file(req.fileUrl, tmp_path)
 
-        with PipelineStep("extract_text", detail=f"format={suffix}"):
-            extracted = extractor.extract(tmp_path, provider=req.provider)
-            page_source = extracted.get("page_source", "approximate")
+            with PipelineStep("extract_text", detail=f"format={suffix}"):
+                extracted = extractor.extract(tmp_path, provider=req.provider)
+                paper_text = extracted["text"]
+                page_source = extracted.get("page_source", "approximate")
+                logger.debug(
+                    f"Extracted {len(paper_text)} chars for citation (page_source={page_source})",
+                    extra={"step": "extract_text"},
+                )
+        else:
+            # Manual source: fetch stored text content from Convex
+            paper = await run_in_threadpool(convex_client.get_paper, req.paperId)
+            paper_text = paper.get("manualContent", "") if paper else ""
+            if not paper_text:
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "No content available for citation matching"},
+                )
+            page_source = "none"
             logger.debug(
-                f"Extracted {len(extracted['text'])} chars for citation (page_source={page_source})",
+                f"Using manual content: {len(paper_text)} chars (no page numbers)",
                 extra={"step": "extract_text"},
             )
 
@@ -350,7 +424,7 @@ async def cite(req: CiteRequest):
             scores = mapper.score_sections(
                 {},
                 target_sections,
-                extracted["text"],
+                paper_text,
                 language=cite_language,
                 provider=req.provider,
             )
@@ -390,6 +464,19 @@ class OptimizeRequest(BaseModel):
     context_after: str = ""
     language: str = "en"
     provider: str = "openai"
+    ## User-provided mode instruction that replaces the hardcoded default.
+    ## Citation/language/format rules are still appended automatically.
+    custom_prompt: str | None = None
+
+
+@app.get("/optimize/defaults")
+async def get_optimize_defaults():
+    """Return the baseline mode instructions for display in the settings UI.
+
+    The frontend uses these to show the user what they are customizing,
+    avoiding hardcoding the same prompts in two places.
+    """
+    return {"modes": optimizer.MODE_INSTRUCTIONS}
 
 
 @app.post("/optimize")
@@ -413,6 +500,7 @@ async def optimize_text(req: OptimizeRequest):
             context_after=req.context_after,
             language=req.language,
             provider=req.provider,
+            custom_prompt=req.custom_prompt,
         )
         logger.info("Optimize completed", extra={"step": "optimize", "status": "completed"})
         return {"optimized": result}
@@ -571,6 +659,20 @@ async def zotero_items(collection: Optional[str] = None):
         return JSONResponse(status_code=401, content={"detail": str(e)})
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": f"Zotero API error: {e}"})
+
+
+@app.delete("/zotero/item/{item_key}")
+async def zotero_delete_item(item_key: str):
+    """Delete an item from the user's Zotero library."""
+    try:
+        zotero_client.delete_item(item_key)
+        return {"status": "deleted"}
+    except PermissionError as e:
+        return JSONResponse(status_code=403, content={"detail": str(e)})
+    except ZoteroConfigError as e:
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"Zotero delete failed: {e}"})
 
 
 class ZoteroImportRequest(BaseModel):

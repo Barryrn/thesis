@@ -32,6 +32,12 @@ export default defineSchema({
         v.literal("saving")
       )
     ),
+    /// Pasted text content for manual sources (no PDF).
+    /// Used by the summarizer and citation matcher in place of extracted PDF text.
+    manualContent: v.optional(v.string()),
+    /// Epoch-ms timestamp of the last summarization run against manualContent.
+    /// Compared to content edits to decide whether the "regenerate" button shows.
+    manualContentSummarizedAt: v.optional(v.number()),
   }),
 
   paperIdentifiers: defineTable({
@@ -103,6 +109,36 @@ export default defineSchema({
     /// Cached array of unique paper IDs referenced in body. Recomputed on save.
     citedPaperIds: v.array(v.id("papers")),
     updatedAt: v.number(),
+    /// Per-section AI prompt overrides. Each mode can have a full prompt
+    /// replacement and/or extra context that appends to the effective base.
+    aiPromptOverrides: v.optional(
+      v.object({
+        enhance: v.optional(
+          v.object({
+            prompt: v.optional(v.string()),
+            extraContext: v.optional(v.string()),
+          })
+        ),
+        formalize: v.optional(
+          v.object({
+            prompt: v.optional(v.string()),
+            extraContext: v.optional(v.string()),
+          })
+        ),
+        simplify: v.optional(
+          v.object({
+            prompt: v.optional(v.string()),
+            extraContext: v.optional(v.string()),
+          })
+        ),
+        expand: v.optional(
+          v.object({
+            prompt: v.optional(v.string()),
+            extraContext: v.optional(v.string()),
+          })
+        ),
+      })
+    ),
   }).index("by_section", ["sectionId"]),
 
   /// Bibliographic metadata for a paper, 1:1 extension of the papers table.
@@ -209,6 +245,31 @@ export default defineSchema({
           ),
           startPage: v.number(),
         }),
+      })
+    ),
+    /// User-configurable citation style and bibliography ordering.
+    /// When absent, HKA Kürzel footnote style with alphabetical ordering is used.
+    citationSettings: v.optional(
+      v.object({
+        style: v.union(
+          v.literal("hkaFootnote"),
+          v.literal("numbered"),
+          v.literal("authorYear")
+        ),
+        ordering: v.union(
+          v.literal("alphabetical"),
+          v.literal("appearance")
+        ),
+      })
+    ),
+    /// User-configurable AI prompt overrides per optimization mode.
+    /// When absent, the hardcoded baseline prompts in optimizer.py are used.
+    aiPromptSettings: v.optional(
+      v.object({
+        enhance: v.optional(v.string()),
+        formalize: v.optional(v.string()),
+        simplify: v.optional(v.string()),
+        expand: v.optional(v.string()),
       })
     ),
   }),

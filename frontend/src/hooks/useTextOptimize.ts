@@ -75,7 +75,15 @@ function extractContextAfter(body: string, end: number): string {
 /// Manages the full lifecycle: request → loading → preview/error → accept/discard.
 /// Citation markers are swapped to placeholders before the AI call and restored
 /// after, ensuring they are never lost or corrupted.
-export function useTextOptimize(body: string, language: string = "en", provider: string = "openai") {
+///
+/// @param getCustomPrompt Optional callback that returns the resolved custom prompt
+///   for a given mode. Called at request time to avoid stale closures.
+export function useTextOptimize(
+  body: string,
+  language: string = "en",
+  provider: string = "openai",
+  getCustomPrompt?: (mode: OptimizeMode) => string | undefined,
+) {
   const [state, setState] = useState<OptimizeState>(INITIAL_STATE);
   /// Abort controller so we can cancel in-flight requests on discard.
   const abortRef = useRef<AbortController | null>(null);
@@ -114,6 +122,9 @@ export function useTextOptimize(body: string, language: string = "en", provider:
         const contextBefore = extractContextBefore(body, selectionStart);
         const contextAfter = extractContextAfter(body, selectionEnd);
 
+        // Resolve custom prompt for this mode (if any tier is customized).
+        const customPrompt = getCustomPrompt?.(mode);
+
         const res = await fetch(`${PYTHON_SERVICE_URL}/optimize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -125,6 +136,7 @@ export function useTextOptimize(body: string, language: string = "en", provider:
             context_after: contextAfter,
             language,
             provider,
+            ...(customPrompt ? { custom_prompt: customPrompt } : {}),
           }),
         });
 
@@ -170,7 +182,7 @@ export function useTextOptimize(body: string, language: string = "en", provider:
         }));
       }
     },
-    [body, language, provider]
+    [body, language, provider, getCustomPrompt]
   );
 
   /// Accepts the optimized text, splicing it into the body at the original

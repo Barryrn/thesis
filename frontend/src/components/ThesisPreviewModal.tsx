@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -7,10 +7,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Loader2, Settings } from "lucide-react";
-import { compileDocument, DEFAULT_LAYOUT } from "@/lib/documentCompiler";
-import type { FigureDoc, PaperDoc, LayoutSettings } from "@/lib/documentCompiler";
+import { Loader2, Settings, Sparkles } from "lucide-react";
+import { compileDocument, DEFAULT_LAYOUT, DEFAULT_CITATION } from "@/lib/documentCompiler";
+import type { FigureDoc, PaperDoc, LayoutSettings, CitationSettings } from "@/lib/documentCompiler";
+import type { AiPromptSettings } from "@/lib/types";
 import LayoutSettingsPanel from "./LayoutSettingsPanel";
+import AiPromptsSettingsPanel from "./AiPromptsSettingsPanel";
+import { useBaselinePrompts } from "@/hooks/useBaselinePrompts";
 import "@/styles/hka-preview.css";
 import "katex/dist/katex.min.css";
 
@@ -61,26 +64,73 @@ export default function ThesisPreviewModal({
 }: ThesisPreviewModalProps) {
   const data = useQuery(api.thesisExport.getThesisData);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  /// Which sidebar panel is active: "none" | "layout" | "ai".
+  const [activePanel, setActivePanel] = useState<"none" | "layout" | "ai">("none");
   const updateLayoutMutation = useMutation(api.thesisMetadata.updateLayoutSettings);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const updateCitationMutation = useMutation(api.thesisMetadata.updateCitationSettings);
+  const updateAiPromptsMutation = useMutation(api.thesisMetadata.updateAiPromptSettings);
+  const layoutSaveRef = useRef<ReturnType<typeof setTimeout>>();
+  const citationSaveRef = useRef<ReturnType<typeof setTimeout>>();
+  const aiPromptsSaveRef = useRef<ReturnType<typeof setTimeout>>();
+  const { baselines } = useBaselinePrompts();
+
+  /// Clear pending debounce timers on unmount to prevent stale mutations.
+  useEffect(() => {
+    return () => {
+      if (layoutSaveRef.current) clearTimeout(layoutSaveRef.current);
+      if (citationSaveRef.current) clearTimeout(citationSaveRef.current);
+      if (aiPromptsSaveRef.current) clearTimeout(aiPromptsSaveRef.current);
+    };
+  }, []);
 
   /// Debounced auto-save of layout settings to Convex.
   const handleLayoutChange = useCallback(
     (newSettings: LayoutSettings) => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(() => {
+      if (layoutSaveRef.current) clearTimeout(layoutSaveRef.current);
+      layoutSaveRef.current = setTimeout(() => {
         updateLayoutMutation({ layoutSettings: newSettings });
       }, 500);
     },
     [updateLayoutMutation]
   );
 
-  /// Resets layout to HKA defaults.
-  const handleLayoutReset = useCallback(() => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+  /// Debounced auto-save of citation settings to Convex.
+  const handleCitationChange = useCallback(
+    (newSettings: CitationSettings) => {
+      if (citationSaveRef.current) clearTimeout(citationSaveRef.current);
+      citationSaveRef.current = setTimeout(() => {
+        updateCitationMutation({ citationSettings: newSettings });
+      }, 500);
+    },
+    [updateCitationMutation]
+  );
+
+  /// Debounced auto-save of AI prompt settings to Convex.
+  const handleAiPromptsChange = useCallback(
+    (newSettings: AiPromptSettings) => {
+      if (aiPromptsSaveRef.current) clearTimeout(aiPromptsSaveRef.current);
+      aiPromptsSaveRef.current = setTimeout(() => {
+        updateAiPromptsMutation({ aiPromptSettings: newSettings });
+      }, 500);
+    },
+    [updateAiPromptsMutation]
+  );
+
+  /// Clears all global AI prompt overrides, reverting to baselines.
+  const handleAiPromptsReset = useCallback(() => {
+    if (aiPromptsSaveRef.current) clearTimeout(aiPromptsSaveRef.current);
+    updateAiPromptsMutation({
+      aiPromptSettings: {},
+    });
+  }, [updateAiPromptsMutation]);
+
+  /// Resets layout and citation settings to HKA defaults.
+  const handleReset = useCallback(() => {
+    if (layoutSaveRef.current) clearTimeout(layoutSaveRef.current);
+    if (citationSaveRef.current) clearTimeout(citationSaveRef.current);
     updateLayoutMutation({ layoutSettings: DEFAULT_LAYOUT });
-  }, [updateLayoutMutation]);
+    updateCitationMutation({ citationSettings: DEFAULT_CITATION });
+  }, [updateLayoutMutation, updateCitationMutation]);
 
   /// Transform raw Convex data into DocumentData shape for the compiler.
   const compiled = useMemo(() => {
@@ -179,17 +229,34 @@ export default function ThesisPreviewModal({
       >
         <SheetHeader className="shrink-0 flex flex-row items-center gap-2 pr-12">
           <SheetTitle>Thesis Preview</SheetTitle>
-          <button
-            onClick={() => setShowSettings((v) => !v)}
-            className={`ml-auto p-1.5 rounded-md transition-colors ${
-              showSettings
-                ? "bg-amber/20 text-amber"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Layout settings"
-          >
-            <Settings className="size-4" />
-          </button>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() =>
+                setActivePanel((v) => (v === "ai" ? "none" : "ai"))
+              }
+              className={`p-1.5 rounded-md transition-colors ${
+                activePanel === "ai"
+                  ? "bg-amber/20 text-amber"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="AI prompt settings"
+            >
+              <Sparkles className="size-4" />
+            </button>
+            <button
+              onClick={() =>
+                setActivePanel((v) => (v === "layout" ? "none" : "layout"))
+              }
+              className={`p-1.5 rounded-md transition-colors ${
+                activePanel === "layout"
+                  ? "bg-amber/20 text-amber"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Layout settings"
+            >
+              <Settings className="size-4" />
+            </button>
+          </div>
         </SheetHeader>
 
         {!compiled ? (
@@ -198,12 +265,21 @@ export default function ThesisPreviewModal({
           </div>
         ) : (
           <div className="flex-1 flex overflow-hidden">
-            {/* Sidebar: layout settings panel or mini-TOC */}
-            {showSettings ? (
+            {/* Sidebar: layout settings, AI prompts, or mini-TOC */}
+            {activePanel === "layout" ? (
               <LayoutSettingsPanel
                 layoutSettings={compiled.layoutSettings}
+                citationSettings={compiled.citationSettings ?? DEFAULT_CITATION}
                 onChange={handleLayoutChange}
-                onReset={handleLayoutReset}
+                onCitationChange={handleCitationChange}
+                onReset={handleReset}
+              />
+            ) : activePanel === "ai" ? (
+              <AiPromptsSettingsPanel
+                aiPromptSettings={data?.metadata?.aiPromptSettings as AiPromptSettings | undefined}
+                baselines={baselines}
+                onChange={handleAiPromptsChange}
+                onReset={handleAiPromptsReset}
               />
             ) : (
               <nav className="w-48 shrink-0 border-r border-border/30 overflow-y-auto p-3 space-y-0.5">
@@ -372,7 +448,9 @@ export default function ThesisPreviewModal({
                                   dangerouslySetInnerHTML={{ __html: section.renderedBody }}
                                 />
                               )}
-                              {section.footnotes.length > 0 && (
+                              {/* Footnotes only shown for HKA Kürzel style */}
+                              {compiled.citationSettings.style === "hkaFootnote" &&
+                                section.footnotes.length > 0 && (
                                 <div className="hka-footnotes">
                                   <ol style={{ listStyle: "none", padding: 0 }}>
                                     {section.footnotes.map((fn) => (
@@ -400,7 +478,9 @@ export default function ThesisPreviewModal({
                     <h1>Literaturverzeichnis</h1>
                     {compiled.bibliography.map((entry, i) => (
                       <div key={i} className="hka-bib-entry">
-                        <span className="bib-kuerzel">[{entry.kuerzel}]</span>{" "}
+                        {entry.kuerzel && (
+                          <><span className="bib-kuerzel">[{entry.kuerzel}]</span>{" "}</>
+                        )}
                         {entry.formattedText}
                       </div>
                     ))}

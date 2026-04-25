@@ -31,10 +31,17 @@ MODE_INSTRUCTIONS = {
 }
 
 
-def _build_system_prompt(mode: str, language: str = "en") -> str:
-    """Build the system prompt for a given optimization mode."""
+def _build_system_prompt(
+    mode: str, language: str = "en", custom_prompt: str | None = None
+) -> str:
+    """Build the system prompt for a given optimization mode.
+
+    When custom_prompt is provided it replaces the hardcoded mode instruction,
+    but citation-preservation, language, and output-format rules are always
+    appended regardless.
+    """
     lang_name = LANGUAGE_NAMES.get(language, "English")
-    base = MODE_INSTRUCTIONS[mode]
+    base = custom_prompt if custom_prompt else MODE_INSTRUCTIONS[mode]
 
     ref_instruction = (
         "\n\nCRITICAL: The text may contain citation placeholders like [REF1], [REF2], etc. "
@@ -61,6 +68,7 @@ def optimize(
     context_after: str = "",
     language: str = "en",
     provider: str = "openai",
+    custom_prompt: str | None = None,
 ) -> str:
     """Optimize text using the specified mode.
 
@@ -70,6 +78,9 @@ def optimize(
         context_before: Surrounding text before the selection for flow context.
         context_after: Surrounding text after the selection for flow context.
         language: Language code (e.g., 'en', 'de').
+        custom_prompt: Optional user-provided mode instruction that replaces
+            the hardcoded default. Citation/language/format rules are still
+            appended automatically.
 
     Returns:
         The optimized text string.
@@ -82,7 +93,10 @@ def optimize(
     if mode not in VALID_MODES:
         raise ValueError(f"Invalid mode '{mode}'. Must be one of: {VALID_MODES}")
 
-    system_prompt = _build_system_prompt(mode, language)
+    if custom_prompt and len(custom_prompt) > 2000:
+        raise ValueError("Custom prompt exceeds 2000 character limit")
+
+    system_prompt = _build_system_prompt(mode, language, custom_prompt=custom_prompt)
 
     # Build user message with optional context
     parts = []
