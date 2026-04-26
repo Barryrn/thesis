@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
@@ -22,28 +23,25 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function getStatusBadge(status: UploadFileState["status"]) {
-  switch (status) {
-    case "queued":
-      return { label: "Queued", className: "bg-gray-400 text-white" };
-    case "uploading":
-      return {
-        label: "Uploading",
-        className: "bg-blue-500 text-white animate-pulse",
-      };
-    case "creating":
-      return { label: "Creating", className: "bg-blue-500 text-white" };
-    case "triggering":
-      return {
-        label: "Processing",
-        className: "bg-yellow-500 text-white animate-pulse",
-      };
-    case "done":
-      return { label: "Done", className: "bg-green-500 text-white" };
-    case "error":
-      return { label: "Failed", className: "bg-red-500 text-white" };
-  }
-}
+/// Maps upload status to CSS class names. Labels are resolved via i18n at render time.
+const STATUS_BADGE_CLASSES: Record<UploadFileState["status"], string> = {
+  queued: "bg-gray-400 text-white",
+  uploading: "bg-blue-500 text-white animate-pulse",
+  creating: "bg-blue-500 text-white",
+  triggering: "bg-yellow-500 text-white animate-pulse",
+  done: "bg-green-500 text-white",
+  error: "bg-red-500 text-white",
+};
+
+/// Maps upload status to translation keys for the badge label.
+const STATUS_BADGE_KEYS: Record<UploadFileState["status"], string> = {
+  queued: "uploadZone.statusQueued",
+  uploading: "uploadZone.statusUploading",
+  creating: "uploadZone.statusCreating",
+  triggering: "uploadZone.statusProcessing",
+  done: "uploadZone.statusDone",
+  error: "uploadZone.statusFailed",
+};
 
 function isAcceptedFile(file: File): boolean {
   if (ACCEPTED_TYPES.includes(file.type)) return true;
@@ -112,6 +110,7 @@ interface UploadZoneProps {
 }
 
 export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
+  const { t } = useTranslation();
   const [files, setFiles] = useState<UploadFileState[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -334,9 +333,9 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
     const accepted = Array.from(fileList).filter(isAcceptedFile);
     if (accepted.length === 0) {
       if (fromFolder) {
-        addLog("warn", "Folder contained no accepted files (.pdf, .docx, .txt)");
+        addLog("warn", t("uploadZone.noFilesInFolder"));
       } else if (fileList.length > 0) {
-        addLog("warn", `${fileList.length} file(s) skipped — only .pdf, .docx, and .txt are accepted`);
+        addLog("warn", t("uploadZone.filesSkipped", { count: fileList.length }));
       }
       return;
     }
@@ -387,7 +386,7 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
           if (hasDirectory) {
             const { files: collectedFiles, truncated } = await collectFilesFromEntries(entries);
             if (truncated) {
-              addLog("warn", `Folder contained more than ${MAX_FOLDER_FILES} accepted files — only the first ${MAX_FOLDER_FILES} will be uploaded`);
+              addLog("warn", t("uploadZone.folderTooLarge", { max: MAX_FOLDER_FILES }));
             }
             handleFiles(collectedFiles, true);
           } else {
@@ -426,10 +425,10 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
           }}
         />
         <p className="text-muted-foreground font-medium">
-          Drop PDF, DOCX, or TXT files — or an entire folder
+          {t("uploadZone.dropFiles")}
         </p>
         <p className="text-sm text-muted-foreground mt-1">
-          click to browse files, or{" "}
+          {t("uploadZone.clickToBrowse")}{" "}
           <button
             type="button"
             onClick={(e) => {
@@ -438,7 +437,7 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
             }}
             className="underline hover:text-foreground transition-colors"
           >
-            select a folder
+            {t("uploadZone.selectFolder")}
           </button>
         </p>
       </div>
@@ -446,7 +445,8 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
       {files.length > 0 && (
         <div className="space-y-2">
           {files.map((entry, i) => {
-            const statusInfo = getStatusBadge(entry.status);
+            const statusClassName = STATUS_BADGE_CLASSES[entry.status];
+            const statusLabel = t(STATUS_BADGE_KEYS[entry.status]);
             const liveStatus = getLiveStatus(entry);
             return (
               <div
@@ -482,8 +482,8 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
                     </Badge>
                   )}
                   {!liveStatus && (
-                    <Badge className={`text-xs ${statusInfo.className}`}>
-                      {statusInfo.label}
+                    <Badge className={`text-xs ${statusClassName}`}>
+                      {statusLabel}
                     </Badge>
                   )}
                 </div>
@@ -500,13 +500,13 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
             className="w-full flex items-center justify-between px-3 py-2 bg-muted/50 hover:bg-muted transition-colors text-sm font-medium"
           >
             <span className="flex items-center gap-2">
-              Upload Logs
+              {t("uploadZone.uploadLogs")}
               {logs.some((l) => l.level === "error") && (
                 <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
               )}
             </span>
             <span className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{logs.length} entries</span>
+              <span className="text-xs text-muted-foreground">{t("uploadZone.entries", { count: logs.length })}</span>
               <span className="text-muted-foreground">{showLogs ? "\u25B2" : "\u25BC"}</span>
             </span>
           </button>
@@ -541,7 +541,7 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
                 onClick={() => { setLogs([]); setShowLogs(false); }}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
-                Clear logs
+                {t("uploadZone.clearLogs")}
               </button>
             </div>
           )}

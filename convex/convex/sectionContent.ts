@@ -50,19 +50,23 @@ export const saveSectionContent = mutation({
 });
 
 /// Validator for per-mode AI prompt override (prompt replacement + extra context).
-const aiPromptOverrideValidator = v.optional(
-  v.object({
-    prompt: v.optional(v.string()),
-    extraContext: v.optional(v.string()),
-  })
-);
+const aiPromptOverrideValidator = v.object({
+  prompt: v.optional(v.string()),
+  extraContext: v.optional(v.string()),
+});
 
-/// Validator for the full per-section AI prompt overrides object.
+/// Validator for all mode overrides within a single language.
+const langOverridesValidator = v.object({
+  enhance: v.optional(aiPromptOverrideValidator),
+  formalize: v.optional(aiPromptOverrideValidator),
+  simplify: v.optional(aiPromptOverrideValidator),
+  expand: v.optional(aiPromptOverrideValidator),
+});
+
+/// Validator for the full per-section AI prompt overrides object, keyed by language.
 const aiPromptOverridesValidator = v.object({
-  enhance: aiPromptOverrideValidator,
-  formalize: aiPromptOverrideValidator,
-  simplify: aiPromptOverrideValidator,
-  expand: aiPromptOverrideValidator,
+  en: v.optional(langOverridesValidator),
+  de: v.optional(langOverridesValidator),
 });
 
 /// Updates only the AI prompt overrides for a section's content.

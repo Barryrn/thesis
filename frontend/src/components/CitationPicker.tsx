@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Search, ArrowLeft } from "lucide-react";
 import type { CitationType, SectionMatch } from "@/lib/types";
 
@@ -350,6 +351,8 @@ function Stage2Details({
   onInsert,
   onDismiss,
 }: Stage2Props) {
+  const { t } = useTranslation();
+
   /// Papers available as secondary sources (excludes the primary selection).
   const secondaryCandidates = useMemo(
     () => matches.filter((m) => m.paperId !== selectedPaper.paperId),
@@ -428,7 +431,7 @@ function Stage2Details({
       <div className="px-3 py-2.5 space-y-3">
         {/* Citation type toggle */}
         <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Zitattyp</label>
+          <label className="text-[11px] text-muted-foreground">{t("citationPicker.citationType")}</label>
           <div className="flex gap-1.5">
             <button
               onClick={() => setCitationType("indirect")}
@@ -438,7 +441,7 @@ function Stage2Details({
                   : "bg-muted/20 text-muted-foreground hover:bg-muted/30"
               }`}
             >
-              Indirekt
+              {t("citationPicker.indirect")}
             </button>
             <button
               onClick={() => setCitationType("direct")}
@@ -448,7 +451,7 @@ function Stage2Details({
                   : "bg-muted/20 text-muted-foreground hover:bg-muted/30"
               }`}
             >
-              Direkt
+              {t("citationPicker.direct")}
             </button>
           </div>
         </div>
@@ -456,7 +459,7 @@ function Stage2Details({
         {/* Page reference input */}
         <div className="space-y-1">
           <label className="text-[11px] text-muted-foreground">
-            Seitenverweis
+            {t("citationPicker.pageReference")}
           </label>
           <input
             ref={pageRefInputRef}
@@ -467,7 +470,7 @@ function Stage2Details({
             className="w-full bg-transparent border border-border/30 rounded px-2 py-1 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-amber/40"
           />
           <p className="text-[10px] text-muted-foreground/60">
-            Suffixe: f. (folgende), ff. (fortfolgende)
+            {t("citationPicker.pageSuffixHelp")}
           </p>
         </div>
 
@@ -477,13 +480,13 @@ function Stage2Details({
             onClick={() => setShowSecondary(true)}
             className="text-[11px] text-muted-foreground hover:text-amber transition-colors"
           >
-            + Sekundärquelle
+            {t("citationPicker.addSecondary")}
           </button>
         ) : (
           <div className="space-y-2 pt-1 border-t border-border/20">
             <div className="flex items-center justify-between">
               <label className="text-[11px] text-muted-foreground">
-                Sekundärquelle
+                {t("citationPicker.secondarySource")}
               </label>
               <button
                 onClick={() => {
@@ -494,7 +497,7 @@ function Stage2Details({
                 }}
                 className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
               >
-                Entfernen
+                {t("common.remove")}
               </button>
             </div>
 
@@ -514,7 +517,7 @@ function Stage2Details({
                   }}
                   className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground shrink-0 transition-colors"
                 >
-                  Ändern
+                  {t("common.change")}
                 </button>
               </div>
             ) : (
@@ -526,13 +529,13 @@ function Stage2Details({
                   }}
                   className="w-full text-left bg-transparent border border-border/30 rounded px-2 py-1 text-[11px] text-muted-foreground/60"
                 >
-                  Quelle auswählen…
+                  {t("citationPicker.selectSource")}
                 </button>
                 {secondaryPickerOpen && (
                   <div className="absolute top-full left-0 right-0 mt-1 rounded border border-border/30 bg-card shadow-md max-h-32 overflow-y-auto z-10">
                     {secondaryCandidates.length === 0 ? (
                       <p className="text-[10px] text-muted-foreground/60 italic px-2 py-1.5">
-                        Keine weiteren Quellen verfügbar.
+                        {t("citationPicker.noMoreSources")}
                       </p>
                     ) : (
                       secondaryCandidates.map((m, i) => (
@@ -576,7 +579,7 @@ function Stage2Details({
             onClick={onDismiss}
             className="text-[11px] text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
           >
-            Abbrechen
+            {t("common.cancel")}
           </button>
           <button
             onClick={onInsert}
@@ -587,7 +590,7 @@ function Stage2Details({
                 : "bg-muted/10 text-muted-foreground/40 cursor-not-allowed"
             }`}
           >
-            Einfügen
+            {t("citationPicker.insert")}
           </button>
         </div>
       </div>

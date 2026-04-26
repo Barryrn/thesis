@@ -30,6 +30,33 @@ MODE_INSTRUCTIONS = {
     ),
 }
 
+MODE_INSTRUCTIONS_DE = {
+    "enhance": (
+        "Verbessere die Klarheit, den Lesefluss und die Wortwahl des folgenden Textes. "
+        "Behalte die gleiche Bedeutung, den gleichen Ton und die ungefähre Länge bei."
+    ),
+    "formalize": (
+        "Schreibe den folgenden Text in einem formalen akademischen Stil um, der für eine "
+        "Abschlussarbeit geeignet ist. Behalte die gleiche Bedeutung bei. Verwende "
+        "wissenschaftliches Vokabular und Satzstrukturen."
+    ),
+    "simplify": (
+        "Vereinfache den folgenden Text für ein klareres, prägnanteres Lesen. "
+        "Entferne unnötige Komplexität, aber behalte die gleiche Bedeutung bei."
+    ),
+    "expand": (
+        "Erweitere den folgenden Text mit mehr Details, Tiefe und unterstützenden "
+        "Erläuterungen. Führe die Ideen weiter aus, ohne die ursprüngliche Bedeutung "
+        "und Richtung zu ändern."
+    ),
+}
+
+## Maps language codes to their respective mode instruction dicts.
+MODE_INSTRUCTIONS_BY_LANG = {
+    "en": MODE_INSTRUCTIONS,
+    "de": MODE_INSTRUCTIONS_DE,
+}
+
 
 def _build_system_prompt(
     mode: str, language: str = "en", custom_prompt: str | None = None
@@ -41,7 +68,7 @@ def _build_system_prompt(
     appended regardless.
     """
     lang_name = LANGUAGE_NAMES.get(language, "English")
-    base = custom_prompt if custom_prompt else MODE_INSTRUCTIONS[mode]
+    base = custom_prompt if custom_prompt else MODE_INSTRUCTIONS_BY_LANG.get(language, MODE_INSTRUCTIONS)[mode]
 
     ref_instruction = (
         "\n\nCRITICAL: The text may contain citation placeholders like [REF1], [REF2], etc. "

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { useDroppable } from "@dnd-kit/core";
 import {
@@ -39,17 +40,17 @@ export default function SectionDetailPanel({
 }
 
 function EmptyState() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
       <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-5">
         <BookOpen className="size-7 text-amber-dim" />
       </div>
       <h2 className="heading-serif text-2xl text-foreground/80 mb-2">
-        Select a section
+        {t("sectionDetail.selectSection")}
       </h2>
       <p className="text-sm text-muted-foreground max-w-xs leading-relaxed">
-        Click any section in the outline to see its matched papers and their
-        summaries
+        {t("sectionDetail.selectSectionHint")}
       </p>
     </div>
   );
@@ -62,6 +63,7 @@ function SectionContent({
   activeSection: ActiveSection;
   onMatchOrderChange?: (matchIds: Id<"paperSectionMatches">[]) => void;
 }) {
+  const { t } = useTranslation();
   const [sortBy, setSortBy] = useState<PaperSort>("relevance");
   const [activeTab, setActiveTab] = useState<CenterTab>("papers");
 
@@ -140,7 +142,7 @@ function SectionContent({
             }`}
           >
             <BookOpen className="size-3" />
-            Papers
+            {t("sectionDetail.tabPapers")}
             {matches.length > 0 && (
               <span className="text-[10px] opacity-60">{matches.length}</span>
             )}
@@ -154,7 +156,7 @@ function SectionContent({
             }`}
           >
             <PenLine className="size-3" />
-            Write
+            {t("sectionDetail.tabWrite")}
           </button>
         </div>
 
@@ -163,8 +165,8 @@ function SectionContent({
           <div className="flex items-center justify-between mt-1.5">
             <p className="text-sm text-muted-foreground">
               {matches.length === 0
-                ? "No papers assigned"
-                : `${matches.length} paper${matches.length !== 1 ? "s" : ""} assigned`}
+                ? t("sectionDetail.noPapersAssigned")
+                : t("sectionDetail.papersAssigned", { count: matches.length })}
             </p>
 
             {matches.length > 1 && (
@@ -178,7 +180,7 @@ function SectionContent({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Relevance
+                  {t("sectionDetail.sortRelevance")}
                 </button>
                 <button
                   onClick={() => setSortBy("excerpts")}
@@ -188,7 +190,7 @@ function SectionContent({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Excerpts
+                  {t("sectionDetail.sortExcerpts")}
                 </button>
                 <button
                   onClick={() => setSortBy("manual")}
@@ -198,7 +200,7 @@ function SectionContent({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Manual
+                  {t("sectionDetail.sortManual")}
                 </button>
               </div>
             )}
@@ -219,7 +221,7 @@ function SectionContent({
           {matches.length === 0 ? (
             <div className="border-2 border-dashed border-border/30 rounded-lg py-16 text-center">
               <p className="text-sm text-muted-foreground">
-                Drag papers here to assign them to this section
+                {t("sectionDetail.dragPapersHere")}
               </p>
             </div>
           ) : sortBy === "manual" ? (
@@ -262,6 +264,7 @@ function EditableNotesDropdown({
   notes?: string;
   sectionId: SectionId;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(notes ?? "");
@@ -281,10 +284,10 @@ function EditableNotesDropdown({
         className="flex items-center gap-1.5 text-xs text-amber-dim hover:text-amber transition-colors"
       >
         <StickyNote className="size-3" />
-        <span>Section Notes</span>
+        <span>{t("sectionDetail.sectionNotes")}</span>
         {notes && (
           <span className="text-[9px] text-muted-foreground normal-case tracking-normal ml-1">
-            (has notes)
+            {t("sectionDetail.hasNotes")}
           </span>
         )}
         <ChevronDown
@@ -302,7 +305,7 @@ function EditableNotesDropdown({
                   setDirty(true);
                 }}
                 className="text-sm min-h-[80px] bg-transparent"
-                placeholder="Add notes about this section..."
+                placeholder={t("sectionDetail.addSectionNotes")}
               />
               <div className="flex gap-2 justify-end">
                 <Button
@@ -314,11 +317,11 @@ function EditableNotesDropdown({
                     setDirty(false);
                   }}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 {dirty && (
                   <Button size="xs" onClick={handleSave}>
-                    Save
+                    {t("sectionDetail.saveNotes")}
                   </Button>
                 )}
               </div>
@@ -331,7 +334,7 @@ function EditableNotesDropdown({
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground/50 italic">
-                  No section notes yet.
+                  {t("sectionDetail.noSectionNotes")}
                 </p>
               )}
               <button

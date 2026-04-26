@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,25 +19,27 @@ interface PaperCardProps {
   sourceSectionId: SectionId | null;
 }
 
+/// Returns a translation key and styling class for the relevance score badge.
 function getScoreBadge(score: number) {
   if (score >= 0.7)
     return {
-      label: "Strong",
+      tKey: "paperCard.strong",
       className: "bg-green-500 hover:bg-green-500 text-white",
     };
   if (score >= 0.5)
     return {
-      label: "Possible",
+      tKey: "paperCard.possible",
       className: "bg-yellow-500 hover:bg-yellow-500 text-white",
     };
   return {
-    label: "Weak",
+    tKey: "paperCard.weak",
     className: "bg-red-500 hover:bg-red-500 text-white",
   };
 }
 
-function formatAuthors(authors: string[]): string {
-  if (authors.length === 0) return "Unknown authors";
+/// Formats author list for display; accepts a fallback string for empty lists.
+function formatAuthors(authors: string[], unknownLabel: string): string {
+  if (authors.length === 0) return unknownLabel;
   if (authors.length <= 2) return authors.join(", ");
   return `${authors[0]}, ${authors[1]} et al.`;
 }
@@ -51,6 +54,7 @@ export default function PaperCard({
   isDraggable: draggable = false,
   sourceSectionId,
 }: PaperCardProps) {
+  const { t } = useTranslation();
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const dragId = `paper-${sourceSectionId ?? "unassigned"}-${paperId}`;
@@ -99,16 +103,16 @@ export default function PaperCard({
                 {title}
               </button>
               <p className="text-xs text-muted-foreground truncate">
-                {formatAuthors(authors)}
+                {formatAuthors(authors, t("paperCard.unknownAuthors"))}
                 {year ? ` (${year})` : ""}
               </p>
             </div>
             <div className="flex flex-col items-end gap-1 shrink-0">
               <Badge className={`text-xs ${badge.className}`}>
-                {badge.label}
+                {t(badge.tKey)}
               </Badge>
               {isManualOverride && (
-                <span className="text-xs text-muted-foreground">Manual</span>
+                <span className="text-xs text-muted-foreground">{t("paperCard.manualBadge")}</span>
               )}
             </div>
           </CardContent>

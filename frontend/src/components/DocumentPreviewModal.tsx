@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import PdfViewer from "@/components/PdfViewer";
 import { useQuery, useMutation } from "convex/react";
@@ -39,19 +40,21 @@ interface DocumentPreviewModalProps {
   onCite: (paperId: PaperId, sectionIds: SectionId[]) => Promise<void>;
 }
 
-const statusLabels: Record<string, { label: string; className: string }> = {
-  completed: { label: "Processed", className: "bg-sage/20 text-sage" },
-  processing: { label: "Processing", className: "bg-dusty-blue/20 text-dusty-blue" },
-  pending: { label: "Pending", className: "bg-dusty-blue/10 text-dusty-blue/70" },
-  failed: { label: "Failed", className: "bg-destructive/20 text-destructive" },
+/// Maps paper status to a translation key and badge styling class.
+const statusLabels: Record<string, { tKey: string; className: string }> = {
+  completed: { tKey: "documentPreview.statusProcessed", className: "bg-sage/20 text-sage" },
+  processing: { tKey: "documentPreview.statusProcessing", className: "bg-dusty-blue/20 text-dusty-blue" },
+  pending: { tKey: "documentPreview.statusPending", className: "bg-dusty-blue/10 text-dusty-blue/70" },
+  failed: { tKey: "documentPreview.statusFailed", className: "bg-destructive/20 text-destructive" },
 };
 
+/// Returns a translation key and styling class for the relevance score badge.
 function getScoreBadge(score: number) {
   if (score >= 0.7)
-    return { label: "Strong", className: "bg-sage/20 text-sage border-sage/30" };
+    return { tKey: "paperCard.strong", className: "bg-sage/20 text-sage border-sage/30" };
   if (score >= 0.5)
-    return { label: "Possible", className: "bg-amber/15 text-amber border-amber/30" };
-  return { label: "Weak", className: "bg-destructive/15 text-destructive border-destructive/30" };
+    return { tKey: "paperCard.possible", className: "bg-amber/15 text-amber border-amber/30" };
+  return { tKey: "paperCard.weak", className: "bg-destructive/15 text-destructive border-destructive/30" };
 }
 
 function formatDate(timestamp: number): string {
@@ -64,17 +67,18 @@ function formatDate(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
-function formatAuthors(authors: string[]): string {
-  if (authors.length === 0) return "Unknown authors";
-  if (authors.length <= 3) return authors.join(", ");
-  return `${authors[0]}, ${authors[1]} et al.`;
-}
-
 export default function DocumentPreviewModal({
   paper,
   onClose,
   onCite,
 }: DocumentPreviewModalProps) {
+  const { t } = useTranslation();
+
+  function formatAuthors(authors: string[]): string {
+    if (authors.length === 0) return t("documentPreview.unknownAuthors");
+    if (authors.length <= 3) return authors.join(", ");
+    return `${authors[0]}, ${authors[1]} et al.`;
+  }
   const summary = useQuery(api.summaries.getSummaryByPaper, {
     paperId: paper._id,
   });
@@ -150,7 +154,7 @@ export default function DocumentPreviewModal({
       });
   }, [sections, assignedSectionIds, sectionSearch]);
 
-  const status = statusLabels[paper.status] ?? statusLabels.pending;
+  const statusEntry = statusLabels[paper.status] ?? statusLabels.pending;
 
   /// Assigns this paper to a section and triggers GPT-based citation automatically.
   /// Creates a placeholder match first so the assignment is visible immediately,
@@ -213,9 +217,9 @@ export default function DocumentPreviewModal({
 
             <Badge
               variant="secondary"
-              className={`text-[10px] h-5 ${status.className}`}
+              className={`text-[10px] h-5 ${statusEntry.className}`}
             >
-              {status.label}
+              {t(statusEntry.tKey)}
             </Badge>
 
             {paper.fileUrl && (
@@ -269,7 +273,7 @@ export default function DocumentPreviewModal({
                 <button
                   onClick={() => setIsPdfFullscreen(true)}
                   className="ml-auto p-1 text-muted-foreground hover:text-foreground transition-colors"
-                  title="Full screen"
+                  title={t("documentPreview.fullScreen")}
                 >
                   <Maximize2 className="size-3.5" />
                 </button>
@@ -295,7 +299,7 @@ export default function DocumentPreviewModal({
             <div className="rounded-lg border border-border/30 bg-card/50 p-6 text-center">
               <FileText className="size-8 text-muted-foreground/30 mx-auto mb-2" />
               <p className="text-sm text-muted-foreground italic">
-                Paper has not been processed yet.
+                {t("paperCard.notProcessed")}
               </p>
             </div>
           )}
@@ -317,21 +321,21 @@ export default function DocumentPreviewModal({
               )}
 
               {/* Research Question */}
-              <SummaryBlock label="Research Question">
+              <SummaryBlock label={t("documentPreview.researchQuestion")}>
                 <p className="text-sm text-foreground/80 leading-relaxed">
                   {summary.researchQuestion}
                 </p>
               </SummaryBlock>
 
               {/* Methodology */}
-              <SummaryBlock label="Methodology">
+              <SummaryBlock label={t("documentPreview.methodology")}>
                 <p className="text-sm text-foreground/70 leading-relaxed">
                   {summary.methodology}
                 </p>
               </SummaryBlock>
 
               {/* Key Findings */}
-              <SummaryBlock label="Key Findings">
+              <SummaryBlock label={t("documentPreview.keyFindings")}>
                 <ul className="space-y-1.5">
                   {summary.keyFindings.map((finding, i) => (
                     <li
@@ -356,7 +360,7 @@ export default function DocumentPreviewModal({
                       showRawSummary ? "rotate-180" : ""
                     }`}
                   />
-                  Full Summary
+                  {t("paperCard.fullSummary")}
                 </button>
                 {showRawSummary && (
                   <p className="mt-2 text-sm text-foreground/70 leading-relaxed border-l-2 border-amber/20 pl-3">
@@ -441,8 +445,8 @@ export default function DocumentPreviewModal({
                     <div className="p-3 text-center">
                       <p className="text-xs text-muted-foreground">
                         {sections?.length === assignedSectionIds.size
-                          ? "Assigned to all sections"
-                          : "No matching sections"}
+                          ? t("documentPreview.assignedToAll")
+                          : t("documentPreview.noMatchingSections")}
                       </p>
                     </div>
                   ) : (
@@ -504,14 +508,14 @@ export default function DocumentPreviewModal({
                           )}
                           {assignment.isManualOverride && (
                             <span className="text-[9px] text-amber-dim/70 uppercase tracking-wider">
-                              Manual
+                              {t("paperCard.manualBadge")}
                             </span>
                           )}
                           <Badge
                             variant="outline"
                             className={`text-[10px] h-4 px-1.5 ${badge.className}`}
                           >
-                            {badge.label}
+                            {t(badge.tKey)}
                           </Badge>
                           <button
                             onClick={() =>
@@ -570,7 +574,7 @@ export default function DocumentPreviewModal({
             <button
               onClick={() => setIsPdfFullscreen(false)}
               className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-              title="Close full screen"
+              title={t("documentPreview.closeFullScreen")}
             >
               <X className="size-4" />
             </button>
@@ -639,6 +643,7 @@ function AssignmentExcerpts({
 }
 
 function DocumentNotesBlock({ paper }: { paper: Paper }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(paper.notes ?? "");
   const [dirty, setDirty] = useState(false);
@@ -656,10 +661,10 @@ function DocumentNotesBlock({ paper }: { paper: Paper }) {
         className="flex items-center gap-1.5 text-[11px] font-medium text-amber-dim uppercase tracking-wider hover:text-amber transition-colors"
       >
         <StickyNote className="size-3" />
-        <span>Document Notes</span>
+        <span>{t("paperCard.documentNotes")}</span>
         {paper.notes && (
           <span className="text-[9px] text-muted-foreground normal-case tracking-normal ml-1">
-            (has notes)
+            {t("paperCard.hasNotes")}
           </span>
         )}
         <ChevronDown
@@ -682,7 +687,7 @@ function DocumentNotesBlock({ paper }: { paper: Paper }) {
           {dirty && (
             <div className="flex justify-end">
               <Button size="xs" onClick={handleSave}>
-                Save Notes
+                {t("paperCard.saveNotes")}
               </Button>
             </div>
           )}

@@ -3,6 +3,7 @@
 /// Respects the active citation style and ordering from thesis metadata.
 /// Provides CRUD management of sources via a slide-in sheet.
 import { useMemo, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "convex/react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Copy, BookOpen, Check, Plus, Pencil } from "lucide-react";
@@ -30,6 +31,7 @@ function sortSurname(fullName: string): string {
 
 /// Renders the full bibliography view with sorted, formatted source entries.
 export default function BibliographyPage() {
+  const { t } = useTranslation();
   const allSources = useQuery(api.sources.listAllSources) ?? [];
   const metadata = useQuery(api.thesisMetadata.getMetadata);
   const citationSettings: CitationSettings = {
@@ -88,7 +90,7 @@ export default function BibliographyPage() {
       )
       .join("\n\n");
     navigator.clipboard.writeText(text);
-    toast.success("Literaturverzeichnis in die Zwischenablage kopiert");
+    toast.success(t("bibliography.copiedToClipboard"));
   }, [sorted]);
 
   /// Copies a single formatted bibliography entry to the clipboard.
@@ -96,7 +98,7 @@ export default function BibliographyPage() {
     (sourceId: string, formattedText: string) => {
       navigator.clipboard.writeText(formattedText);
       setCopiedId(sourceId);
-      toast.success("Eintrag kopiert");
+      toast.success(t("bibliography.entryCopied"));
       // Reset the copied indicator after a short delay
       setTimeout(() => setCopiedId(null), 2000);
     },
@@ -111,7 +113,7 @@ export default function BibliographyPage() {
           <Link to="/">
             <button
               className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted/20"
-              title="Zurück zur Übersicht"
+              title={t("bibliography.backToOverview")}
             >
               <ArrowLeft className="size-5" />
             </button>
@@ -119,20 +121,20 @@ export default function BibliographyPage() {
           <div className="flex items-center gap-2">
             <BookOpen className="size-4 text-amber" />
             <h1 className="heading-serif text-xl text-amber">
-              Literaturverzeichnis
+              {t("bibliography.title")}
             </h1>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           <span className="text-[11px] text-muted-foreground">
-            {sorted.length} {sorted.length === 1 ? "Quelle" : "Quellen"}
+            {t("bibliography.sourceCount", { count: sorted.length })}
             {" · "}
             {citationSettings.style === "hkaFootnote"
-              ? "HKA Kürzel"
+              ? t("bibliography.formatHka")
               : citationSettings.style === "numbered"
-                ? "Nummeriert [1]"
-                : "Autor-Jahr"}
+                ? t("bibliography.formatNumbered")
+                : t("bibliography.formatAuthorYear")}
           </span>
           <button
             onClick={handleCopyAll}
@@ -140,14 +142,14 @@ export default function BibliographyPage() {
             className="text-[11px] px-3 py-1.5 rounded-lg border border-border/30 text-muted-foreground hover:text-foreground hover:border-border/50 transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Copy className="size-3.5" />
-            Alle kopieren
+            {t("bibliography.copyAll")}
           </button>
           <button
             onClick={handleAddNew}
             className="text-[11px] px-3 py-1.5 rounded-lg bg-amber text-background hover:bg-amber/90 transition-colors flex items-center gap-1.5 font-medium"
           >
             <Plus className="size-3.5" />
-            Neue Quelle
+            {t("bibliography.newSource")}
           </button>
         </div>
       </header>
@@ -190,7 +192,7 @@ export default function BibliographyPage() {
                     </span>
                   ) : (
                     <span className="text-[10px] bg-muted/40 text-muted-foreground px-1.5 py-0.5 rounded shrink-0 mt-0.5">
-                      Manuell
+                      {t("bibliography.manualBadge")}
                     </span>
                   )}
 
@@ -204,14 +206,14 @@ export default function BibliographyPage() {
                     <button
                       onClick={() => handleEdit(source as SourceWithPaper)}
                       className="text-muted-foreground hover:text-amber p-1 rounded-md hover:bg-muted/20"
-                      title="Quelle bearbeiten"
+                      title={t("bibliography.editSource")}
                     >
                       <Pencil className="size-3.5" />
                     </button>
                     <button
                       onClick={() => handleCopySingle(source._id, entry)}
                       className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted/20"
-                      title="Eintrag kopieren"
+                      title={t("bibliography.copyEntry")}
                     >
                       {copiedId === source._id ? (
                         <Check className="size-3.5 text-green-500" />
@@ -229,17 +231,17 @@ export default function BibliographyPage() {
           <div className="text-center py-20">
             <BookOpen className="size-10 text-muted-foreground/30 mx-auto mb-4" />
             <p className="text-muted-foreground text-sm">
-              Noch keine Quellen vorhanden.
+              {t("bibliography.emptyTitle")}
             </p>
             <p className="text-muted-foreground/60 text-[11px] mt-1">
-              Lade Papers hoch oder erstelle Quellen manuell.
+              {t("bibliography.emptyDescription")}
             </p>
             <button
               onClick={handleAddNew}
               className="mt-4 text-sm px-4 py-2 rounded-lg bg-amber text-background hover:bg-amber/90 transition-colors inline-flex items-center gap-1.5 font-medium"
             >
               <Plus className="size-4" />
-              Neue Quelle hinzufügen
+              {t("bibliography.addNewSource")}
             </button>
           </div>
         )}

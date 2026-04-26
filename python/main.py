@@ -471,12 +471,17 @@ class OptimizeRequest(BaseModel):
 
 @app.get("/optimize/defaults")
 async def get_optimize_defaults():
-    """Return the baseline mode instructions for display in the settings UI.
+    """Return the baseline mode instructions per language for the settings UI.
 
     The frontend uses these to show the user what they are customizing,
     avoiding hardcoding the same prompts in two places.
     """
-    return {"modes": optimizer.MODE_INSTRUCTIONS}
+    return {
+        "modes": {
+            "en": optimizer.MODE_INSTRUCTIONS,
+            "de": optimizer.MODE_INSTRUCTIONS_DE,
+        }
+    }
 
 
 @app.post("/optimize")

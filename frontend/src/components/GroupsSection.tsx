@@ -2,6 +2,7 @@
 /// Shows all user-defined paper groups with colour dots, paper counts, and
 /// controls for creating, renaming, recolouring, and deleting groups.
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -55,6 +56,7 @@ function ColorPalette({
 
 /// Inline form for creating a new group (name + colour picker).
 function CreateGroupForm({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const createGroup = useMutation(api.groups.createGroup);
   const [name, setName] = useState("");
   const [color, setColor] = useState(GROUP_COLORS[0].value);
@@ -82,7 +84,7 @@ function CreateGroupForm({ onDone }: { onDone: () => void }) {
         ref={inputRef}
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Group name…"
+        placeholder={t("groups.groupName")}
         className="w-full h-7 px-2 text-xs bg-muted/40 border border-border/50 rounded-md text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-amber/40"
       />
       <ColorPalette selected={color} onSelect={setColor} />
@@ -92,14 +94,14 @@ function CreateGroupForm({ onDone }: { onDone: () => void }) {
           disabled={!name.trim()}
           className="flex-1 h-7 text-xs rounded-md bg-amber/15 text-amber hover:bg-amber/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Create
+          {t("common.create")}
         </button>
         <button
           type="button"
           onClick={onDone}
           className="px-3 h-7 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
       </div>
     </form>
@@ -118,6 +120,7 @@ function GroupRow({
   isSelected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   const updateGroup = useMutation(api.groups.updateGroup);
   const deleteGroup = useMutation(api.groups.deleteGroup);
 
@@ -157,7 +160,7 @@ function GroupRow({
 
   async function handleDelete() {
     setMenuOpen(false);
-    if (window.confirm(`Delete group "${group.name}"? Papers will not be deleted.`)) {
+    if (window.confirm(t("groups.deleteConfirm", { name: group.name }))) {
       await deleteGroup({ groupId: group._id });
     }
   }
@@ -239,7 +242,7 @@ function GroupRow({
                   className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors"
                 >
                   <Pencil className="size-3 text-muted-foreground" />
-                  Rename
+                  {t("groups.rename")}
                 </button>
                 <button
                   onClick={(e) => {
@@ -252,7 +255,7 @@ function GroupRow({
                     className="w-3 h-3 rounded-full shrink-0"
                     style={{ backgroundColor: group.color }}
                   />
-                  Recolor
+                  {t("groups.recolor")}
                 </button>
                 <button
                   onClick={(e) => {
@@ -262,7 +265,7 @@ function GroupRow({
                   className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 text-destructive transition-colors"
                 >
                   <Trash2 className="size-3" />
-                  Delete
+                  {t("common.delete")}
                 </button>
               </>
             )}
@@ -280,6 +283,7 @@ export default function GroupsSection({
   selectedGroupId,
   onSelectGroup,
 }: GroupsSectionProps) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -294,7 +298,7 @@ export default function GroupsSection({
           <ChevronDown
             className={`size-3 transition-transform ${collapsed ? "-rotate-90" : ""}`}
           />
-          Groups
+          {t("groups.title")}
           {selectedGroupId && (
             <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber inline-block" />
           )}
@@ -303,7 +307,7 @@ export default function GroupsSection({
           <button
             onClick={() => setCreating((c) => !c)}
             className="p-0.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
-            title="Create group"
+            title={t("groups.createGroup")}
           >
             <Plus className="size-3.5" />
           </button>

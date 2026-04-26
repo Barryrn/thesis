@@ -3,6 +3,8 @@
 /// handles Kürzel auto-generation with manual override support.
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { useLanguage } from "@/lib/LanguageContext";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -49,14 +51,14 @@ interface SourceEditSheetProps {
   source: SourceWithPaper | null;
 }
 
-/// Human-readable labels for each source type.
-const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
-  book: "Buch",
-  bookChapter: "Buchkapitel (Sammelband)",
-  journalArticle: "Zeitschriftenartikel",
-  newspaperArticle: "Zeitungsartikel",
-  internetSource: "Internetquelle",
-};
+/// All possible source type keys, used to render the type dropdown.
+const SOURCE_TYPE_KEYS: SourceType[] = [
+  "book",
+  "bookChapter",
+  "journalArticle",
+  "newspaperArticle",
+  "internetSource",
+];
 
 /// Shared CSS for form inputs matching the app's dark theme.
 const FIELD_CLASS =
@@ -69,6 +71,8 @@ export default function SourceEditSheet({
   onOpenChange,
   source,
 }: SourceEditSheetProps) {
+  const { t } = useTranslation();
+  const { language } = useLanguage();
   const isEditing = source !== null;
 
   // Mutations
@@ -241,13 +245,13 @@ export default function SourceEditSheet({
   /// Saves the source (create or update).
   const handleSave = useCallback(async () => {
     if (!title.trim()) {
-      toast.error("Titel ist erforderlich");
+      toast.error(t("toast.titleRequired"));
       return;
     }
 
     const filteredAuthors = authors.filter((a) => a.trim());
     if (filteredAuthors.length === 0) {
-      toast.error("Mindestens ein Autor ist erforderlich");
+      toast.error(t("toast.authorRequired"));
       return;
     }
 
@@ -281,7 +285,7 @@ export default function SourceEditSheet({
           ...sourceFields,
         });
 
-        toast.success("Quelle aktualisiert");
+        toast.success(t("toast.sourceUpdated"));
       } else {
         // Create new manual source
         const result = await createManual({
@@ -298,28 +302,28 @@ export default function SourceEditSheet({
 
         // Auto-trigger summarization when text content is provided
         if (manualContent.trim()) {
-          toast.info("Zusammenfassung wird generiert...");
+          toast.info(t("toast.summaryGenerating"));
           fetch(`${PYTHON_SERVICE_URL}/process-manual`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               paperId: result.paperId,
               text: manualContent.trim(),
-              language: "de",
+              language,
               provider: "openai",
             }),
           }).catch(() => {
-            toast.error("Zusammenfassung fehlgeschlagen");
+            toast.error(t("toast.summaryFailed"));
           });
         }
 
-        toast.success("Quelle erstellt");
+        toast.success(t("toast.sourceCreated"));
       }
 
       onOpenChange(false);
     } catch (err) {
       toast.error(
-        `Fehler: ${err instanceof Error ? err.message : "Unbekannter Fehler"}`
+        t("common.error", { message: err instanceof Error ? err.message : t("common.unknownError") })
       );
     } finally {
       setSaving(false);
@@ -348,14 +352,14 @@ export default function SourceEditSheet({
         body: JSON.stringify({
           paperId: source.paperId,
           text: manualContent.trim(),
-          language: "de",
+          language,
           provider: "openai",
         }),
       });
       if (!res.ok) throw new Error("Summarization failed");
-      toast.success("Zusammenfassung generiert");
+      toast.success(t("toast.summaryGenerated"));
     } catch {
-      toast.error("Zusammenfassung fehlgeschlagen");
+      toast.error(t("toast.summaryFailed"));
     } finally {
       setSummarizing(false);
     }
@@ -368,17 +372,17 @@ export default function SourceEditSheet({
     setDeleting(true);
     try {
       await deleteSafe({ paperId: source.paperId });
-      toast.success("Quelle gelöscht");
+      toast.success(t("toast.sourceDeleted"));
       onOpenChange(false);
     } catch (err) {
       toast.error(
-        `${err instanceof Error ? err.message : "Löschen fehlgeschlagen"}`
+        err instanceof Error ? err.message : t("toast.deleteFailed")
       );
     } finally {
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
-  }, [source, deleteSafe, onOpenChange]);
+  }, [source, deleteSafe, onOpenChange, t]);
 
   /// Deletes the source from the Zotero library and then from this project.
   const handleDeleteFromZotero = useCallback(async () => {
@@ -393,23 +397,23 @@ export default function SourceEditSheet({
 
       if (res.status === 403) {
         const err = await res.json();
-        toast.error(err.detail ?? "Zotero API-Schlüssel hat keine Löschberechtigung");
+        toast.error(err.detail ?? t("toast.zoteroNoDeletePermission"));
         return;
       }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-        toast.error(`Zotero-Löschung fehlgeschlagen: ${err.detail}`);
+        toast.error(t("toast.zoteroDeleteFailed", { message: err.detail }));
         return;
       }
 
       // Also remove from this project
       await deleteSafe({ paperId: source.paperId });
-      toast.success("Aus Zotero und Projekt gelöscht");
+      toast.success(t("toast.deletedFromZoteroAndProject"));
       onOpenChange(false);
     } catch (err) {
       toast.error(
-        `${err instanceof Error ? err.message : "Löschen fehlgeschlagen"}`
+        err instanceof Error ? err.message : t("toast.deleteFailed")
       );
     } finally {
       setDeletingFromZotero(false);
@@ -449,22 +453,22 @@ export default function SourceEditSheet({
       >
         <SheetHeader className="shrink-0">
           <SheetTitle>
-            {isEditing ? "Quelle bearbeiten" : "Neue Quelle"}
+            {isEditing ? t("sourceEditSheet.editSource") : t("sourceEditSheet.newSource")}
           </SheetTitle>
           <SheetDescription>
             {isEditing
-              ? "Bearbeite die bibliographischen Angaben dieser Quelle."
-              : "Füge eine neue Quelle manuell zum Literaturverzeichnis hinzu."}
+              ? t("sourceEditSheet.editDescription")
+              : t("sourceEditSheet.newDescription")}
           </SheetDescription>
           {isEditing && (
             <div className="mt-2">
               {source?.zoteroItemKey ? (
                 <span className="text-[10px] bg-blue-500/20 text-blue-600 px-1.5 py-0.5 rounded">
-                  Quelle: Zotero
+                  {t("sourceEditSheet.originZotero")}
                 </span>
               ) : (
                 <span className="text-[10px] bg-muted/40 text-muted-foreground px-1.5 py-0.5 rounded">
-                  Quelle: Manuell
+                  {t("sourceEditSheet.originManual")}
                 </span>
               )}
             </div>
@@ -473,39 +477,37 @@ export default function SourceEditSheet({
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* ── Source Type ────────────────────────────────────────── */}
-          <FieldGroup label="Quellentyp">
+          <FieldGroup label={t("sourceEditSheet.sourceType")}>
             <select
               value={sourceType}
               onChange={(e) => setSourceType(e.target.value as SourceType)}
               className={FIELD_CLASS}
             >
-              {(Object.entries(SOURCE_TYPE_LABELS) as [SourceType, string][]).map(
-                ([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                )
-              )}
+              {SOURCE_TYPE_KEYS.map((value) => (
+                <option key={value} value={value}>
+                  {t(`sourceTypes.${value}`)}
+                </option>
+              ))}
             </select>
           </FieldGroup>
 
           {/* ── Core Fields ────────────────────────────────────────── */}
-          <FieldGroup label="Titel">
+          <FieldGroup label={t("common.title")}>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Titel der Quelle"
+              placeholder={t("sourceEditSheet.placeholder.title")}
             />
           </FieldGroup>
 
-          <FieldGroup label="Autor(en)">
+          <FieldGroup label={t("sourceEditSheet.authorsLabel")}>
             <div className="space-y-2">
               {authors.map((author, i) => (
                 <div key={i} className="flex items-center gap-2">
                   <Input
                     value={author}
                     onChange={(e) => updateAuthor(i, e.target.value)}
-                    placeholder={`Autor ${i + 1} (Vorname Nachname)`}
+                    placeholder={t("sourceEditSheet.placeholder.author", { index: i + 1 })}
                     className="flex-1"
                   />
                   {authors.length > 1 && (
@@ -523,23 +525,23 @@ export default function SourceEditSheet({
                 className="text-[11px] text-amber hover:text-amber/80 flex items-center gap-1 transition-colors"
               >
                 <Plus className="size-3" />
-                Autor hinzufügen
+                {t("sourceEditSheet.addAuthor")}
               </button>
             </div>
           </FieldGroup>
 
-          <FieldGroup label="Jahr">
+          <FieldGroup label={t("common.year")}>
             <Input
               type="number"
               value={year}
               onChange={(e) => setYear(e.target.value)}
-              placeholder="z.B. 2024"
+              placeholder={t("sourceEditSheet.placeholder.year")}
               className="!w-28"
             />
           </FieldGroup>
 
           {/* ── Kürzel ─────────────────────────────────────────────── */}
-          <FieldGroup label="Kürzel">
+          <FieldGroup label={t("sourceEditSheet.abbreviation")}>
             <div className="space-y-2">
               {isEditing && !kuerzelOverride && (
                 <span className="font-mono text-sm text-amber bg-amber/10 px-2 py-0.5 rounded">
@@ -553,13 +555,13 @@ export default function SourceEditSheet({
                   onChange={(e) => setKuerzelOverride(e.target.checked)}
                   className="rounded border-border/40"
                 />
-                Kürzel manuell festlegen
+                {t("sourceEditSheet.abbreviationManual")}
               </label>
               {kuerzelOverride && (
                 <Input
                   value={kuerzelValue}
                   onChange={(e) => setKuerzelValue(e.target.value)}
-                  placeholder="z.B. KR09"
+                  placeholder={t("sourceEditSheet.placeholder.abbreviation")}
                   className="!w-28 font-mono"
                 />
               )}
@@ -571,25 +573,25 @@ export default function SourceEditSheet({
           {/* Book / Book Chapter shared fields */}
           {(sourceType === "book" || sourceType === "bookChapter") && (
             <>
-              <FieldGroup label="Verlag">
+              <FieldGroup label={t("common.publisher")}>
                 <Input
                   value={publisher}
                   onChange={(e) => setPublisher(e.target.value)}
-                  placeholder="z.B. Springer"
+                  placeholder={t("sourceEditSheet.placeholder.publisher")}
                 />
               </FieldGroup>
-              <FieldGroup label="Verlagsort">
+              <FieldGroup label={t("common.publisherPlace")}>
                 <Input
                   value={publisherLocation}
                   onChange={(e) => setPublisherLocation(e.target.value)}
-                  placeholder="z.B. Berlin"
+                  placeholder={t("sourceEditSheet.placeholder.publisherPlace")}
                 />
               </FieldGroup>
-              <FieldGroup label="Auflage">
+              <FieldGroup label={t("common.edition")}>
                 <Input
                   value={edition}
                   onChange={(e) => setEdition(e.target.value)}
-                  placeholder="z.B. 3. Auflage"
+                  placeholder={t("sourceEditSheet.placeholder.edition")}
                   className="!w-40"
                 />
               </FieldGroup>
@@ -599,21 +601,21 @@ export default function SourceEditSheet({
           {/* Book Chapter specific */}
           {sourceType === "bookChapter" && (
             <>
-              <FieldGroup label="Buchtitel (Sammelband)">
+              <FieldGroup label={t("sourceEditSheet.bookTitleAnthology")}>
                 <Input
                   value={editorBookTitle}
                   onChange={(e) => setEditorBookTitle(e.target.value)}
-                  placeholder="Titel des Sammelbands"
+                  placeholder={t("sourceEditSheet.placeholder.bookTitle")}
                 />
               </FieldGroup>
-              <FieldGroup label="Herausgeber">
+              <FieldGroup label={t("sourceEditSheet.editors")}>
                 <div className="space-y-2">
                   {editorNames.map((editor, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <Input
                         value={editor}
                         onChange={(e) => updateEditor(i, e.target.value)}
-                        placeholder={`Herausgeber ${i + 1}`}
+                        placeholder={t("sourceEditSheet.placeholder.editor", { index: i + 1 })}
                         className="flex-1"
                       />
                       {editorNames.length > 1 && (
@@ -631,24 +633,24 @@ export default function SourceEditSheet({
                     className="text-[11px] text-amber hover:text-amber/80 flex items-center gap-1 transition-colors"
                   >
                     <Plus className="size-3" />
-                    Herausgeber hinzufügen
+                    {t("sourceEditSheet.addEditor")}
                   </button>
                 </div>
               </FieldGroup>
               <div className="flex gap-3">
-                <FieldGroup label="Seite von">
+                <FieldGroup label={t("sourceEditSheet.pageFrom")}>
                   <Input
                     value={pageStart}
                     onChange={(e) => setPageStart(e.target.value)}
-                    placeholder="z.B. 42"
+                    placeholder={t("sourceEditSheet.placeholder.pageFrom")}
                     className="!w-20"
                   />
                 </FieldGroup>
-                <FieldGroup label="Seite bis">
+                <FieldGroup label={t("sourceEditSheet.pageTo")}>
                   <Input
                     value={pageEnd}
                     onChange={(e) => setPageEnd(e.target.value)}
-                    placeholder="z.B. 58"
+                    placeholder={t("sourceEditSheet.placeholder.pageTo")}
                     className="!w-20"
                   />
                 </FieldGroup>
@@ -659,15 +661,15 @@ export default function SourceEditSheet({
           {/* Journal Article */}
           {sourceType === "journalArticle" && (
             <>
-              <FieldGroup label="Zeitschrift">
+              <FieldGroup label={t("sourceEditSheet.journal")}>
                 <Input
                   value={journalName}
                   onChange={(e) => setJournalName(e.target.value)}
-                  placeholder="Name der Zeitschrift"
+                  placeholder={t("sourceEditSheet.placeholder.journal")}
                 />
               </FieldGroup>
               <div className="flex gap-3">
-                <FieldGroup label="Jahrgang">
+                <FieldGroup label={t("sourceEditSheet.volumeLabel")}>
                   <Input
                     value={volume}
                     onChange={(e) => setVolume(e.target.value)}
@@ -675,7 +677,7 @@ export default function SourceEditSheet({
                     className="!w-20"
                   />
                 </FieldGroup>
-                <FieldGroup label="Heft">
+                <FieldGroup label={t("sourceEditSheet.issueLabel")}>
                   <Input
                     value={issue}
                     onChange={(e) => setIssue(e.target.value)}
@@ -685,19 +687,19 @@ export default function SourceEditSheet({
                 </FieldGroup>
               </div>
               <div className="flex gap-3">
-                <FieldGroup label="Seite von">
+                <FieldGroup label={t("sourceEditSheet.pageFrom")}>
                   <Input
                     value={pageStart}
                     onChange={(e) => setPageStart(e.target.value)}
-                    placeholder="z.B. 1"
+                    placeholder={t("sourceEditSheet.placeholder.pageFrom")}
                     className="!w-20"
                   />
                 </FieldGroup>
-                <FieldGroup label="Seite bis">
+                <FieldGroup label={t("sourceEditSheet.pageTo")}>
                   <Input
                     value={pageEnd}
                     onChange={(e) => setPageEnd(e.target.value)}
-                    placeholder="z.B. 15"
+                    placeholder={t("sourceEditSheet.placeholder.pageTo")}
                     className="!w-20"
                   />
                 </FieldGroup>
@@ -708,14 +710,14 @@ export default function SourceEditSheet({
           {/* Newspaper Article */}
           {sourceType === "newspaperArticle" && (
             <>
-              <FieldGroup label="Zeitung">
+              <FieldGroup label={t("sourceEditSheet.newspaper")}>
                 <Input
                   value={newspaperName}
                   onChange={(e) => setNewspaperName(e.target.value)}
-                  placeholder="Name der Zeitung"
+                  placeholder={t("sourceEditSheet.placeholder.newspaper")}
                 />
               </FieldGroup>
-              <FieldGroup label="Erscheinungsdatum">
+              <FieldGroup label={t("sourceEditSheet.publicationDate")}>
                 <Input
                   type="date"
                   value={publishDate}
@@ -729,14 +731,14 @@ export default function SourceEditSheet({
           {/* Internet Source */}
           {sourceType === "internetSource" && (
             <>
-              <FieldGroup label="URL">
+              <FieldGroup label={t("common.url")}>
                 <Input
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://..."
                 />
               </FieldGroup>
-              <FieldGroup label="Abrufdatum">
+              <FieldGroup label={t("sourceEditSheet.accessDate")}>
                 <Input
                   type="date"
                   value={accessDate}
@@ -748,7 +750,7 @@ export default function SourceEditSheet({
           )}
 
           {/* ── Text Content (all manual source types) ────────────── */}
-          <FieldGroup label="Textinhalt (optional)">
+          <FieldGroup label={t("sourceEditSheet.textContent")}>
             <div className="space-y-2">
               {isEditing && manualContent && !showTextContent ? (
                 <button
@@ -756,14 +758,14 @@ export default function SourceEditSheet({
                   className="text-[11px] text-amber hover:text-amber/80 flex items-center gap-1 transition-colors"
                 >
                   <ChevronDown className="size-3" />
-                  Text anzeigen ({manualContent.length.toLocaleString()} Zeichen)
+                  {t("sourceEditSheet.showText", { count: manualContent.length.toLocaleString() })}
                 </button>
               ) : (
                 <>
                   <textarea
                     value={manualContent}
                     onChange={(e) => setManualContent(e.target.value)}
-                    placeholder="Text hier einfügen (z.B. Inhalt einer Internetseite, Abstract, Buchauszug)..."
+                    placeholder={t("sourceEditSheet.placeholder.textContent")}
                     rows={8}
                     className={`${FIELD_CLASS} resize-y min-h-[120px]`}
                   />
@@ -773,7 +775,7 @@ export default function SourceEditSheet({
                       className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
                     >
                       <ChevronUp className="size-3" />
-                      Text ausblenden
+                      {t("sourceEditSheet.hideText")}
                     </button>
                   )}
                 </>
@@ -793,7 +795,7 @@ export default function SourceEditSheet({
                   ) : (
                     <RotateCcw className="size-3 mr-1" />
                   )}
-                  Zusammenfassung neu generieren
+                  {t("sourceEditSheet.regenerateSummary")}
                 </Button>
               )}
             </div>
@@ -811,11 +813,10 @@ export default function SourceEditSheet({
                     <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm font-medium text-destructive">
-                        Quelle wird zitiert
+                        {t("sourceEditSheet.sourceCited")}
                       </p>
                       <p className="text-[11px] text-muted-foreground mt-1">
-                        Diese Quelle ist in folgenden Abschnitten zitiert und
-                        kann nicht gelöscht werden:
+                        {t("sourceEditSheet.sourceCitedWarning")}
                       </p>
                       <ul className="mt-1 space-y-0.5">
                         {citations?.map((c) => (
@@ -835,21 +836,21 @@ export default function SourceEditSheet({
                     className="w-full text-xs"
                     onClick={() => setShowDeleteConfirm(false)}
                   >
-                    Abbrechen
+                    {t("common.cancel")}
                   </Button>
                 </>
               ) : (
                 <>
                   <p className="text-sm text-destructive">
                     {source?.zoteroItemKey
-                      ? "Wie soll die Quelle gelöscht werden?"
-                      : "Quelle endgültig löschen?"}
+                      ? t("sourceEditSheet.deletePrompt")
+                      : t("sourceEditSheet.deleteConfirm")}
                   </p>
 
                   {source?.zoteroItemKey && (
                     <p className="text-[11px] text-red-400 flex items-start gap-1.5">
                       <AlertTriangle className="size-3 shrink-0 mt-0.5" />
-                      „Aus Zotero löschen" entfernt den Eintrag unwiderruflich aus deiner Zotero-Bibliothek.
+                      {t("sourceEditSheet.deleteZoteroWarning")}
                     </p>
                   )}
 
@@ -866,7 +867,7 @@ export default function SourceEditSheet({
                       ) : (
                         <Trash2 className="size-3 mr-1" />
                       )}
-                      Aus Projekt entfernen
+                      {t("sourceEditSheet.removeFromProject")}
                     </Button>
 
                     {source?.zoteroItemKey && (
@@ -882,7 +883,7 @@ export default function SourceEditSheet({
                         ) : (
                           <Trash2 className="size-3 mr-1" />
                         )}
-                        Aus Zotero löschen
+                        {t("sourceEditSheet.deleteFromZotero")}
                       </Button>
                     )}
 
@@ -892,7 +893,7 @@ export default function SourceEditSheet({
                       className="w-full text-xs"
                       onClick={() => setShowDeleteConfirm(false)}
                     >
-                      Abbrechen
+                      {t("common.cancel")}
                     </Button>
                   </div>
                 </>
@@ -909,7 +910,7 @@ export default function SourceEditSheet({
                 onClick={() => setShowDeleteConfirm(true)}
               >
                 <Trash2 className="size-3 mr-1" />
-                Löschen
+                {t("common.delete")}
               </Button>
             )}
 
@@ -921,7 +922,7 @@ export default function SourceEditSheet({
               className="text-xs"
               onClick={() => onOpenChange(false)}
             >
-              Abbrechen
+              {t("common.cancel")}
             </Button>
             <Button
               size="sm"
@@ -934,7 +935,7 @@ export default function SourceEditSheet({
               ) : (
                 <Save className="size-3 mr-1" />
               )}
-              {isEditing ? "Speichern" : "Erstellen"}
+              {isEditing ? t("common.save") : t("common.create")}
             </Button>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useQuery } from "convex/react";
 import { useDroppable } from "@dnd-kit/core";
@@ -20,13 +21,14 @@ export default function OutlineSidebar({
   onSelectSection,
   citingSections,
 }: OutlineSidebarProps) {
+  const { t } = useTranslation();
   const sections = useQuery(api.outline.listSections) ?? [];
   const tree = useMemo(() => buildSectionTree(sections), [sections]);
 
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-sidebar-border flex items-center justify-between">
-        <h2 className="heading-serif text-base text-amber">Outline</h2>
+        <h2 className="heading-serif text-base text-amber">{t("outlineSidebar.outline")}</h2>
         <Link
           to="/upload"
           className="text-muted-foreground hover:text-amber transition-colors"
@@ -38,12 +40,12 @@ export default function OutlineSidebar({
       <div className="flex-1 overflow-y-auto py-2 px-2">
         {sections.length === 0 ? (
           <div className="text-center py-12 px-4 text-muted-foreground">
-            <p className="text-sm">No outline yet</p>
+            <p className="text-sm">{t("outlineSidebar.noOutlineYet")}</p>
             <Link
               to="/upload"
               className="text-xs text-amber hover:underline mt-1 inline-block"
             >
-              Add your thesis outline
+              {t("outlineSidebar.addOutline")}
             </Link>
           </div>
         ) : (
@@ -80,6 +82,7 @@ function SidebarSectionNode({
   onSelectSection,
   citingSections,
 }: SidebarSectionNodeProps) {
+  const { t } = useTranslation();
   const matches = useQuery(api.matches.getMatchesBySection, {
     sectionId: node._id,
   });
@@ -135,7 +138,7 @@ function SidebarSectionNode({
         )}
         {/* Spinner shown while /cite is running for this section */}
         {isCiting ? (
-          <Loader2 className="size-3 text-amber animate-spin shrink-0" title="Extracting citations…" />
+          <Loader2 className="size-3 text-amber animate-spin shrink-0" title={t("outlineSidebar.extractingCitations")} />
         ) : (
           paperCount > 0 && (
             <Badge

@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -28,6 +29,7 @@ export default function FigurePanel({
   body,
   onInsertMarker,
 }: FigurePanelProps) {
+  const { t } = useTranslation();
   const figures = useQuery(api.figures.getFiguresBySection, { sectionId }) ?? [];
   const uploadFigure = useMutation(api.figures.uploadFigure);
   const updateCaption = useMutation(api.figures.updateFigureCaption);
@@ -50,12 +52,12 @@ export default function FigurePanel({
       if (!file) return;
 
       if (file.size > MAX_FILE_SIZE) {
-        alert("File too large. Maximum size is 10 MB.");
+        alert(t("figurePanel.fileTooLarge"));
         return;
       }
 
       if (!file.type.startsWith("image/")) {
-        alert("Only image files are supported.");
+        alert(t("figurePanel.onlyImages"));
         return;
       }
 
@@ -102,7 +104,7 @@ export default function FigurePanel({
   /// Deletes a figure after confirmation.
   const handleDelete = useCallback(
     async (figureId: Id<"figures">) => {
-      if (!confirm("Delete this figure? The marker in text will become orphaned.")) return;
+      if (!confirm(t("figurePanel.deleteConfirm"))) return;
       await deleteFigure({ figureId });
     },
     [deleteFigure]
@@ -121,14 +123,14 @@ export default function FigurePanel({
           ) : (
             <ChevronRight className="size-3" />
           )}
-          Figures ({figures.length})
+          {t("figurePanel.figures", { count: figures.length })}
         </span>
         <label
           className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors flex items-center gap-1 cursor-pointer"
           onClick={(e) => e.stopPropagation()}
         >
           <ImagePlus className="size-3" />
-          {uploading ? "Uploading..." : "Upload"}
+          {uploading ? t("figurePanel.uploading") : t("figurePanel.upload")}
           <input
             type="file"
             accept="image/*"
@@ -146,14 +148,14 @@ export default function FigurePanel({
             <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-amber/5 border border-amber/20">
               <AlertTriangle className="size-3 text-amber" />
               <span className="text-[10px] text-amber-dim">
-                {orphanedIds.length} figure marker(s) in text reference deleted figures
+                {t("figurePanel.orphanedWarning", { count: orphanedIds.length })}
               </span>
             </div>
           )}
 
           {figures.length === 0 && !uploading && (
             <p className="text-xs text-muted-foreground/60 py-2">
-              No figures yet. Upload an image to get started.
+              {t("figurePanel.noFigures")}
             </p>
           )}
 
@@ -192,7 +194,7 @@ export default function FigurePanel({
                       onClick={() => handleSaveCaption(fig._id)}
                       className="text-[10px] text-amber hover:text-amber/80"
                     >
-                      Save
+                      {t("common.save")}
                     </button>
                   </div>
                 ) : (
@@ -216,7 +218,7 @@ export default function FigurePanel({
                     title="Insert marker at cursor"
                   >
                     <Type className="size-2.5" />
-                    Insert
+                    {t("figurePanel.insertMarker")}
                   </button>
                   <button
                     onClick={() => {
@@ -225,7 +227,7 @@ export default function FigurePanel({
                     }}
                     className="text-[10px] text-muted-foreground hover:text-foreground"
                   >
-                    Caption
+                    {t("figurePanel.caption")}
                   </button>
                   <button
                     onClick={() => handleDelete(fig._id)}

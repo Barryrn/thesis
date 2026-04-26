@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import OutlineTreePreview from "./OutlineTreePreview";
 import OutlineFormatGuide from "./OutlineFormatGuide";
 
 export default function OutlineEditor() {
+  const { t } = useTranslation();
   const [rawText, setRawText] = useState("");
   const [editableTree, setEditableTree] = useState<EditableSectionNode[]>([]);
   const [sectionCount, setSectionCount] = useState(0);
@@ -84,7 +86,7 @@ export default function OutlineEditor() {
     if (!parentOrderNumber) {
       newTree.push({
         id: crypto.randomUUID(),
-        title: "New Section",
+        title: t("outlineEditor.newSection"),
         orderNumber: String(newTree.length + 1),
         depth: 1,
         children: [],
@@ -94,7 +96,7 @@ export default function OutlineEditor() {
       if (parent) {
         parent.children.push({
           id: crypto.randomUUID(),
-          title: "New Subsection",
+          title: t("outlineEditor.newSubsection"),
           orderNumber: `${parentOrderNumber}.${parent.children.length + 1}`,
           depth: parent.depth + 1,
           parentOrderNumber,
@@ -124,7 +126,7 @@ export default function OutlineEditor() {
   async function handleSave() {
     const sections = parseOutline(rawText);
     if (sections.length === 0) {
-      toast.error("No valid sections found. Format: '1.2.3 Section Title'");
+      toast.error(t("outlineEditor.invalidFormat"));
       return;
     }
     setSaving(true);
@@ -141,9 +143,9 @@ export default function OutlineEditor() {
         ),
         version: 1,
       });
-      toast.success(`Saved ${count} sections`);
+      toast.success(t("outlineEditor.savedSections", { count }));
     } catch (err) {
-      toast.error(`Failed to save: ${(err as Error).message}`);
+      toast.error(t("outlineEditor.saveFailed", { message: (err as Error).message }));
     } finally {
       setSaving(false);
     }
@@ -167,8 +169,8 @@ export default function OutlineEditor() {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {rawText.trim()
-            ? `${sectionCount} section${sectionCount !== 1 ? "s" : ""} detected`
-            : "Paste your numbered thesis outline above"}
+            ? t("outlineEditor.sectionsDetected", { count: sectionCount })
+            : t("outlineEditor.pasteHint")}
         </p>
         <div className="flex items-center gap-2">
           <Button
@@ -176,10 +178,10 @@ export default function OutlineEditor() {
             size="sm"
             onClick={() => setShowGuide(!showGuide)}
           >
-            <HelpCircle className="size-4 mr-1" /> Format Guide
+            <HelpCircle className="size-4 mr-1" /> {t("outlineEditor.formatGuide")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !rawText.trim()}>
-            {saving ? "Saving..." : "Save Outline"}
+            {saving ? t("outlineEditor.saving") : t("outlineEditor.saveOutline")}
           </Button>
         </div>
       </div>

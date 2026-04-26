@@ -4,6 +4,7 @@
 /// which debounces auto-save to Convex.
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { RotateCcw, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { LayoutSettings, CitationSettings } from "@/lib/documentCompiler";
@@ -77,8 +78,9 @@ export default function LayoutSettingsPanel({
   onCitationChange,
   onReset,
 }: LayoutSettingsPanelProps) {
+  const { t } = useTranslation();
   const allDefault = isLayoutDefault(layoutSettings) && isCitationDefault(citationSettings);
-  const presetLabel = allDefault ? "HKA Standard" : "Custom";
+  const presetLabel = allDefault ? t("layoutSettings.hkaStandard") : t("layoutSettings.custom");
   const [marginsExpanded, setMarginsExpanded] = useState(false);
 
   const update = useCallback(
@@ -113,7 +115,7 @@ export default function LayoutSettingsPanel({
       {/* Header */}
       <div>
         <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-          Layout Settings
+          {t("layoutSettings.title")}
         </p>
         <span className="text-[10px] text-amber/80 font-medium">
           {presetLabel}
@@ -121,7 +123,7 @@ export default function LayoutSettingsPanel({
       </div>
 
       {/* ── Font Size ──────────────────────────────────────────────── */}
-      <Section label="Font Size">
+      <Section label={t("layoutSettings.fontSize")}>
         <SegmentedControl
           options={[10, 11, 12]}
           value={layoutSettings.fontSize}
@@ -129,7 +131,7 @@ export default function LayoutSettingsPanel({
           format={(v) => `${v}pt`}
         />
         <div className="flex items-center gap-1.5 mt-1.5">
-          <label className="text-[10px] text-muted-foreground shrink-0">Custom</label>
+          <label className="text-[10px] text-muted-foreground shrink-0">{t("layoutSettings.customize")}</label>
           <input
             type="number"
             min={8}
@@ -144,12 +146,12 @@ export default function LayoutSettingsPanel({
             }}
             className={INPUT_CLASS + " !w-14"}
           />
-          <span className="text-[10px] text-muted-foreground">pt</span>
+          <span className="text-[10px] text-muted-foreground">{t("layoutSettings.pt")}</span>
         </div>
       </Section>
 
       {/* ── Line Spacing ───────────────────────────────────────────── */}
-      <Section label="Line Spacing">
+      <Section label={t("layoutSettings.lineSpacing")}>
         <SegmentedControl
           options={[1.0, 1.15, 1.5]}
           value={layoutSettings.lineSpacing}
@@ -157,7 +159,7 @@ export default function LayoutSettingsPanel({
           format={(v) => `${v}`}
         />
         <div className="flex items-center gap-1.5 mt-1.5">
-          <label className="text-[10px] text-muted-foreground shrink-0">Custom</label>
+          <label className="text-[10px] text-muted-foreground shrink-0">{t("layoutSettings.customize")}</label>
           <input
             type="number"
             min={0.8}
@@ -176,7 +178,7 @@ export default function LayoutSettingsPanel({
       </Section>
 
       {/* ── Page Margins ───────────────────────────────────────────── */}
-      <Section label="Page Margins">
+      <Section label={t("layoutSettings.pageMargins")}>
         <select
           value={activeMarginPreset(layoutSettings.margins)}
           onChange={(e) => {
@@ -205,7 +207,7 @@ export default function LayoutSettingsPanel({
           ) : (
             <ChevronRight className="size-3" />
           )}
-          Customize
+          {t("layoutSettings.customize")}
         </button>
 
         {marginsExpanded && (
@@ -244,9 +246,9 @@ export default function LayoutSettingsPanel({
       </Section>
 
       {/* ── Page Numbering ─────────────────────────────────────────── */}
-      <Section label="Page Numbers">
+      <Section label={t("layoutSettings.pageNumbers")}>
         {/* Position */}
-        <label className="text-[10px] text-muted-foreground">Position</label>
+        <label className="text-[10px] text-muted-foreground">{t("layoutSettings.position")}</label>
         <SegmentedControl
           options={["header", "footer"]}
           value={layoutSettings.pageNumbering.position}
@@ -255,12 +257,12 @@ export default function LayoutSettingsPanel({
               position: v as LayoutSettings["pageNumbering"]["position"],
             })
           }
-          format={(v) => (v === "header" ? "Top" : "Bottom")}
+          format={(v) => (v === "header" ? t("layoutSettings.positionTop") : t("layoutSettings.positionBottom"))}
         />
 
         {/* Format */}
         <label className="text-[10px] text-muted-foreground mt-2 block">
-          Format
+          {t("layoutSettings.format")}
         </label>
         <select
           value={layoutSettings.pageNumbering.format}
@@ -271,14 +273,14 @@ export default function LayoutSettingsPanel({
           }
           className={INPUT_CLASS}
         >
-          <option value="automatic">Automatic (roman + arabic)</option>
-          <option value="allArabic">All Arabic (1, 2, 3)</option>
-          <option value="allRoman">All Roman (i, ii, iii)</option>
+          <option value="automatic">{t("layoutSettings.formatAutomatic")}</option>
+          <option value="allArabic">{t("layoutSettings.formatArabic")}</option>
+          <option value="allRoman">{t("layoutSettings.formatRoman")}</option>
         </select>
 
         {/* Start page */}
         <label className="text-[10px] text-muted-foreground mt-2 block">
-          Start Page
+          {t("layoutSettings.startPage")}
         </label>
         <input
           type="number"
@@ -296,9 +298,9 @@ export default function LayoutSettingsPanel({
       </Section>
 
       {/* ── Citations ─────────────────────────────────────────────── */}
-      <Section label="Citations">
+      <Section label={t("layoutSettings.citations")}>
         {/* Citation Style */}
-        <label className="text-[10px] text-muted-foreground">Style</label>
+        <label className="text-[10px] text-muted-foreground">{t("layoutSettings.style")}</label>
         <SegmentedControl
           options={["hkaFootnote", "numbered", "authorYear"] as const}
           value={citationSettings.style}
@@ -309,16 +311,16 @@ export default function LayoutSettingsPanel({
           }}
           format={(v) =>
             v === "hkaFootnote"
-              ? "HKA"
+              ? t("layoutSettings.styleHka")
               : v === "numbered"
-                ? "[1]"
-                : "Author"
+                ? t("layoutSettings.styleNumbered")
+                : t("layoutSettings.styleAuthor")
           }
         />
 
         {/* Bibliography Ordering */}
         <label className="text-[10px] text-muted-foreground mt-2 block">
-          Bibliography Order
+          {t("layoutSettings.bibliographyOrder")}
         </label>
         <SegmentedControl
           options={["alphabetical", "appearance"] as const}
@@ -329,7 +331,7 @@ export default function LayoutSettingsPanel({
               ordering: v as CitationSettings["ordering"],
             })
           }
-          format={(v) => (v === "alphabetical" ? "A–Z" : "By Use")}
+          format={(v) => (v === "alphabetical" ? t("layoutSettings.orderAlpha") : t("layoutSettings.orderByUse"))}
         />
       </Section>
 
@@ -342,7 +344,7 @@ export default function LayoutSettingsPanel({
         disabled={allDefault}
       >
         <RotateCcw className="size-3 mr-1" />
-        Reset to HKA Standard
+        {t("layoutSettings.resetToHka")}
       </Button>
     </div>
   );

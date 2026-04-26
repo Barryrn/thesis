@@ -1,6 +1,7 @@
 /// Document library panel (right sidebar). Shows all papers with search,
 /// status filters, group filters, and optional manual sort via drag-and-drop.
 import { useState, useMemo, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import {
   SortableContext,
@@ -16,13 +17,6 @@ type StatusFilter = "all" | "unassigned" | "processing" | "completed";
 type SourceFilter = "all" | "zotero" | "manual";
 type SortMode = "alphabetical" | "manual";
 
-const filterTabs: { key: StatusFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "unassigned", label: "Unassigned" },
-  { key: "processing", label: "In Progress" },
-  { key: "completed", label: "Done" },
-];
-
 import type { Paper, PaperId, PaperGroup, GroupId } from "@/lib/types";
 
 interface DocumentLibraryProps {
@@ -34,6 +28,7 @@ export default function DocumentLibrary({
   onPreviewPaper,
   onLibraryOrderChange,
 }: DocumentLibraryProps) {
+  const { t } = useTranslation();
   const papers = useQuery(api.papers.listPapers) ?? [];
   const unassigned = useQuery(api.matches.getUnassignedPapers) ?? [];
   const groups = (useQuery(api.groups.listGroups) ?? []) as PaperGroup[];
@@ -160,14 +155,14 @@ export default function DocumentLibrary({
       <div className="px-4 py-3 border-b border-border/50">
         <div className="flex items-center justify-between mb-3">
           <h2 className="heading-serif text-base text-foreground">
-            Documents
+            {t("documentLibrary.documents")}
           </h2>
           <button
             onClick={() => setAddSourceOpen(true)}
             className="text-[11px] px-2.5 py-1 rounded-md bg-amber text-background hover:bg-amber/90 transition-colors flex items-center gap-1 font-medium"
           >
             <Plus className="size-3" />
-            Neue Quelle
+            {t("documentLibrary.newSource")}
           </button>
         </div>
 
@@ -176,7 +171,7 @@ export default function DocumentLibrary({
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search papers..."
+            placeholder={t("documentLibrary.searchPapers")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full h-8 pl-8 pr-3 text-sm bg-muted/30 border border-border/50 rounded-md text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-amber/40 focus:border-amber/30 transition-all"
@@ -195,7 +190,12 @@ export default function DocumentLibrary({
 
         {/* Filter tabs */}
         <div className="flex gap-1 mt-2">
-          {filterTabs.map((tab) => (
+          {([
+            { key: "all" as StatusFilter, label: t("documentLibrary.filterAll") },
+            { key: "unassigned" as StatusFilter, label: t("documentLibrary.filterUnassigned") },
+            { key: "processing" as StatusFilter, label: t("documentLibrary.filterInProgress") },
+            { key: "completed" as StatusFilter, label: t("documentLibrary.filterDone") },
+          ]).map((tab) => (
             <button
               key={tab.key}
               onClick={() => setStatusFilter(tab.key)}
@@ -216,9 +216,9 @@ export default function DocumentLibrary({
         {/* Source filter (Zotero / Manual) */}
         <div className="flex gap-1 mt-1.5">
           {([
-            { key: "all" as SourceFilter, label: "Alle Quellen" },
-            { key: "zotero" as SourceFilter, label: "Zotero" },
-            { key: "manual" as SourceFilter, label: "Manuell" },
+            { key: "all" as SourceFilter, label: t("documentLibrary.allSources") },
+            { key: "zotero" as SourceFilter, label: t("common.zotero") },
+            { key: "manual" as SourceFilter, label: t("common.manual") },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -248,7 +248,7 @@ export default function DocumentLibrary({
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              A–Z
+              {t("documentLibrary.sortAlpha")}
             </button>
             <button
               onClick={() => !isFiltered && setSortMode("manual")}
@@ -259,18 +259,18 @@ export default function DocumentLibrary({
                     ? "text-muted-foreground/30 cursor-not-allowed"
                     : "text-muted-foreground hover:text-foreground"
               }`}
-              title={isFiltered ? "Disable filters to use manual sorting" : undefined}
+              title={isFiltered ? t("documentLibrary.disableFiltersHint") : undefined}
             >
-              Manual
+              {t("documentLibrary.sortManual")}
             </button>
             {hasManualOrder && (
               <button
                 onClick={handleReset}
                 className="ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-foreground transition-colors"
-                title="Reset to alphabetical order"
+                title={t("documentLibrary.resetOrder")}
               >
                 <RotateCcw className="size-2.5" />
-                Reset
+                {t("documentLibrary.reset")}
               </button>
             )}
           </div>
@@ -282,7 +282,7 @@ export default function DocumentLibrary({
         {filteredPapers.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <p className="text-sm">
-              {searchQuery ? "No papers match your search" : "No papers uploaded yet"}
+              {searchQuery ? t("documentLibrary.noMatchingPapers") : t("documentLibrary.noPapersUploaded")}
             </p>
           </div>
         ) : effectiveSortMode === "manual" ? (

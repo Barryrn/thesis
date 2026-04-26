@@ -2,6 +2,7 @@
 /// authors, status dot, optional "Unassigned" badge, a group-assignment
 /// menu ("..."), expand toggle for summary preview, and a delete button.
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -31,8 +32,9 @@ const statusColors: Record<string, string> = {
 };
 
 
-function formatAuthors(authors: string[]): string {
-  if (authors.length === 0) return "Unknown authors";
+/// Formats author list for display; accepts a fallback string for empty lists.
+function formatAuthors(authors: string[], unknownLabel: string): string {
+  if (authors.length === 0) return unknownLabel;
   if (authors.length <= 2) return authors.join(", ");
   return `${authors[0]} et al.`;
 }
@@ -49,6 +51,7 @@ function GroupMenu({
   paperGroupIds: Set<GroupId>;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const addPaperToGroup = useMutation(api.groups.addPaperToGroup);
   const removePaperFromGroup = useMutation(api.groups.removePaperFromGroup);
   const ref = useRef<HTMLDivElement>(null);
@@ -78,11 +81,11 @@ function GroupMenu({
       className="absolute right-0 top-6 z-50 min-w-[160px] rounded-md border border-border/50 bg-popover shadow-md overflow-hidden"
     >
       <p className="px-3 py-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wide border-b border-border/30">
-        Add to group
+        {t("groups.addToGroup")}
       </p>
       {groups.length === 0 ? (
         <p className="px-3 py-2 text-xs text-muted-foreground/60 italic">
-          No groups yet
+          {t("groups.noGroups")}
         </p>
       ) : (
         groups.map((g) => {
@@ -118,6 +121,7 @@ export default function LibraryPaperCard({
   groups,
   paperGroupIds,
 }: LibraryPaperCardProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [groupMenuOpen, setGroupMenuOpen] = useState(false);
   const deletePaper = useMutation(api.papers.deletePaper);
@@ -193,101 +197,107 @@ export default function LibraryPaperCard({
         />
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground truncate leading-snug">
-            {paper.title}
-          </p>
-          <p className="text-xs text-muted-foreground truncate mt-0.5">
-            {formatAuthors(paper.authors)}
-            {paper.year ? ` (${paper.year})` : ""}
-          </p>
-          {paper.status === "processing" && paper.processingStep && (
-            <p className="text-[10px] text-dusty-blue mt-0.5 animate-pulse">
-              {PROCESSING_STEP_LABELS[paper.processingStep] ?? "Processing..."}
+          {/* Title row with action buttons */}
+          <div className="flex items-start gap-1.5">
+            <p className="text-sm font-medium text-foreground leading-snug line-clamp-2 flex-1 min-w-0">
+              {paper.title}
             </p>
-          )}
-        </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Origin badge */}
-          {paper.zoteroItemKey ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] h-4 px-1.5 border-blue-500/20 text-blue-500"
-            >
-              Zotero
-            </Badge>
-          ) : (
-            <Badge
-              variant="outline"
-              className="text-[10px] h-4 px-1.5 border-border/30 text-muted-foreground"
-            >
-              Manuell
-            </Badge>
-          )}
-
-          {isUnassigned && (
-            <Badge
-              variant="outline"
-              className="text-[10px] h-4 px-1.5 border-amber/20 text-amber-dim"
-            >
-              Unassigned
-            </Badge>
-          )}
-
-          {/* Delete button */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              if (window.confirm(`Delete "${paper.title}"? This will remove the paper and all its associated data.`)) {
-                deletePaper({ paperId: paper._id });
-              }
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            className="opacity-0 group-hover/card:opacity-100 text-muted-foreground hover:text-destructive transition-all p-0.5"
-          >
-            <Trash2 className="size-3.5" />
-          </button>
-
-          {/* Group assignment menu ("...") */}
-          <div className="relative">
+            {/* Delete button */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                setGroupMenuOpen((o) => !o);
+                if (window.confirm(`Delete "${paper.title}"? This will remove the paper and all its associated data.`)) {
+                  deletePaper({ paperId: paper._id });
+                }
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              className="opacity-0 group-hover/card:opacity-100 text-muted-foreground hover:text-foreground transition-all p-0.5"
-              title="Add to group"
+              className="opacity-0 group-hover/card:opacity-100 text-muted-foreground hover:text-destructive transition-all p-0.5 shrink-0 mt-0.5"
             >
-              <MoreHorizontal className="size-3.5" />
+              <Trash2 className="size-3.5" />
             </button>
 
-            {groupMenuOpen && (
-              <GroupMenu
-                paperId={paper._id}
-                groups={groups}
-                paperGroupIds={paperGroupIds}
-                onClose={() => setGroupMenuOpen(false)}
-              />
+            {/* Group assignment menu ("...") */}
+            <div className="relative shrink-0 mt-0.5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setGroupMenuOpen((o) => !o);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="opacity-0 group-hover/card:opacity-100 text-muted-foreground hover:text-foreground transition-all p-0.5"
+                title={t("groups.addToGroup")}
+              >
+                <MoreHorizontal className="size-3.5" />
+              </button>
+
+              {groupMenuOpen && (
+                <GroupMenu
+                  paperId={paper._id}
+                  groups={groups}
+                  paperGroupIds={paperGroupIds}
+                  onClose={() => setGroupMenuOpen(false)}
+                />
+              )}
+            </div>
+
+            {paper.status === "completed" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setExpanded(!expanded);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="text-muted-foreground hover:text-foreground transition-colors p-0.5 shrink-0 mt-0.5"
+              >
+                <ChevronDown
+                  className={`size-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
+                />
+              </button>
             )}
           </div>
 
-          {paper.status === "completed" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                setExpanded(!expanded);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
-            >
-              <ChevronDown
-                className={`size-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
-              />
-            </button>
+          {/* Subtitle + badges row */}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <p className="text-xs text-muted-foreground truncate">
+              {formatAuthors(paper.authors, t("libraryCard.unknownAuthors"))}
+              {paper.year ? ` (${paper.year})` : ""}
+            </p>
+
+            {/* Origin badge */}
+            {paper.zoteroItemKey ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] h-4 px-1.5 border-blue-500/20 text-blue-500"
+              >
+                {t("common.zotero")}
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className="text-[10px] h-4 px-1.5 border-border/30 text-muted-foreground"
+              >
+                {t("common.manual")}
+              </Badge>
+            )}
+
+            {isUnassigned && (
+              <Badge
+                variant="outline"
+                className="text-[10px] h-4 px-1.5 border-amber/20 text-amber-dim"
+              >
+                {t("libraryCard.unassigned")}
+              </Badge>
+            )}
+          </div>
+
+          {paper.status === "processing" && paper.processingStep && (
+            <p className="text-[10px] text-dusty-blue mt-0.5 animate-pulse">
+              {PROCESSING_STEP_LABELS[paper.processingStep] ?? t("libraryCard.processing")}
+            </p>
           )}
         </div>
       </div>
@@ -303,6 +313,7 @@ function ExpandedSummary({
 }: {
   paperId: Paper["_id"];
 }) {
+  const { t } = useTranslation();
   const summary = useQuery(api.summaries.getSummaryByPaper, { paperId });
 
   if (summary === undefined) {
@@ -316,7 +327,7 @@ function ExpandedSummary({
   if (summary === null) {
     return (
       <div className="px-3 pb-3 pt-0">
-        <p className="text-xs text-muted-foreground italic">Not processed</p>
+        <p className="text-xs text-muted-foreground italic">{t("libraryCard.notProcessed")}</p>
       </div>
     );
   }

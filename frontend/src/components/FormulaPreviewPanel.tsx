@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import katex from "katex";
 import type { FormulaPreviewEntry } from "@/lib/formulaUtils";
 
@@ -11,6 +12,7 @@ interface FormulaPreviewPanelProps {
 export default function FormulaPreviewPanel({
   formulas,
 }: FormulaPreviewPanelProps) {
+  const { t } = useTranslation();
   /// Pre-render all formulas to HTML strings via KaTeX.
   const rendered = useMemo(
     () =>
@@ -35,7 +37,7 @@ export default function FormulaPreviewPanel({
   return (
     <div className="rounded-lg border border-border/30 p-4 bg-muted/10">
       <span className="text-[11px] font-medium text-amber-dim uppercase tracking-wider">
-        Formulas
+        {t("formulaPanel.formulas")}
       </span>
       <div className="mt-2 space-y-2">
         {rendered.map((f) => (
@@ -55,7 +57,7 @@ export default function FormulaPreviewPanel({
               />
             )}
             <span className="text-[9px] text-muted-foreground/40 mt-1 shrink-0">
-              {f.displayMode ? "display" : "inline"}
+              {f.displayMode ? t("formulaPanel.display") : t("formulaPanel.inline")}
             </span>
           </div>
         ))}

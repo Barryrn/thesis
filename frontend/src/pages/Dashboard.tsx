@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation } from "convex/react";
 import {
@@ -27,10 +28,12 @@ import { Search, BookOpen, Settings, Eye, Download, Loader2 } from "lucide-react
 import { PYTHON_SERVICE_URL } from "@/lib/config";
 import { useProvider } from "@/lib/ProviderContext";
 import ProviderToggle from "@/components/ProviderToggle";
+import LanguageSelector from "@/components/LanguageSelector";
 import type { ActiveSection, DragData, PaperId, SectionId, Paper } from "@/lib/types";
 import type { Id } from "../../convex/_generated/dataModel";
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const papers = useQuery(api.papers.listPapers) ?? [];
   const sections = useQuery(api.outline.listSections) ?? [];
   const addMatch = useMutation(api.matches.addMatch);
@@ -243,7 +246,7 @@ export default function Dashboard() {
       <header className="sticky top-0 z-30 h-14 border-b border-border/50 px-5 flex items-center justify-between shrink-0 bg-background/80 backdrop-blur-sm">
         <div className="flex items-center gap-5">
           <h1 className="heading-serif text-xl text-amber">
-            Thesis Paper Organizer
+            {t("dashboard.appTitle")}
           </h1>
           <div className="h-4 w-px bg-border/50" />
           <StatStrip
@@ -254,16 +257,17 @@ export default function Dashboard() {
           />
         </div>
         <div className="flex items-center gap-2">
+          <LanguageSelector />
           <ProviderToggle />
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setSearchOpen(true)}
             className="text-muted-foreground hover:text-amber gap-1.5"
-            title="Search excerpts (Cmd+K)"
+            title={t("dashboard.searchExcerpts")}
           >
             <Search className="size-3.5" />
-            <span className="hidden sm:inline text-xs">Search</span>
+            <span className="hidden sm:inline text-xs">{t("dashboard.search")}</span>
             <kbd className="hidden sm:inline-flex items-center px-1 py-0.5 text-[9px] text-muted-foreground/50 bg-muted/20 rounded border border-border/20 font-mono ml-1">
               {"\u2318"}K
             </kbd>
@@ -273,18 +277,18 @@ export default function Dashboard() {
             size="sm"
             onClick={() => setPreviewOpen(true)}
             className="text-muted-foreground hover:text-amber gap-1.5"
-            title="Preview thesis"
+            title={t("dashboard.previewThesis")}
             disabled={sections.length === 0}
           >
             <Eye className="size-3.5" />
-            <span className="hidden sm:inline text-xs">Preview</span>
+            <span className="hidden sm:inline text-xs">{t("dashboard.preview")}</span>
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={handleExport}
             className="text-muted-foreground hover:text-amber gap-1.5"
-            title="Export as .docx"
+            title={t("dashboard.exportDocx")}
             disabled={exporting || sections.length === 0}
           >
             {exporting ? (
@@ -293,7 +297,7 @@ export default function Dashboard() {
               <Download className="size-3.5" />
             )}
             <span className="hidden sm:inline text-xs">
-              {exporting ? "Exporting..." : "Export"}
+              {exporting ? t("dashboard.exporting") : t("dashboard.export")}
             </span>
           </Button>
           <Button
@@ -301,14 +305,14 @@ export default function Dashboard() {
             size="sm"
             onClick={() => setSettingsOpen(true)}
             className="text-muted-foreground hover:text-amber gap-1.5"
-            title="Thesis settings"
+            title={t("dashboard.thesisSettings")}
           >
             <Settings className="size-3.5" />
           </Button>
           <Link to="/bibliography">
             <button className="text-[11px] px-3 py-1.5 rounded-lg border border-border/30 text-muted-foreground hover:text-foreground hover:border-border/50 transition-colors flex items-center gap-1.5">
               <BookOpen className="size-3.5" />
-              Literaturverzeichnis
+              {t("dashboard.bibliography")}
             </button>
           </Link>
           <Link to="/upload#upload">
@@ -317,7 +321,7 @@ export default function Dashboard() {
               size="sm"
               className="border-amber/20 text-amber hover:bg-amber/10 hover:text-amber"
             >
-              Upload Papers
+              {t("dashboard.uploadPapers")}
             </Button>
           </Link>
         </div>

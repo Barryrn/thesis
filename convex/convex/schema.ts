@@ -111,34 +111,20 @@ export default defineSchema({
     updatedAt: v.number(),
     /// Per-section AI prompt overrides. Each mode can have a full prompt
     /// replacement and/or extra context that appends to the effective base.
-    aiPromptOverrides: v.optional(
-      v.object({
-        enhance: v.optional(
-          v.object({
-            prompt: v.optional(v.string()),
-            extraContext: v.optional(v.string()),
-          })
-        ),
-        formalize: v.optional(
-          v.object({
-            prompt: v.optional(v.string()),
-            extraContext: v.optional(v.string()),
-          })
-        ),
-        simplify: v.optional(
-          v.object({
-            prompt: v.optional(v.string()),
-            extraContext: v.optional(v.string()),
-          })
-        ),
-        expand: v.optional(
-          v.object({
-            prompt: v.optional(v.string()),
-            extraContext: v.optional(v.string()),
-          })
-        ),
-      })
-    ),
+    aiPromptOverrides: v.optional(v.object({
+      en: v.optional(v.object({
+        enhance: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+        formalize: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+        simplify: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+        expand: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+      })),
+      de: v.optional(v.object({
+        enhance: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+        formalize: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+        simplify: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+        expand: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
+      })),
+    })),
   }).index("by_section", ["sectionId"]),
 
   /// Bibliographic metadata for a paper, 1:1 extension of the papers table.
@@ -264,14 +250,20 @@ export default defineSchema({
     ),
     /// User-configurable AI prompt overrides per optimization mode.
     /// When absent, the hardcoded baseline prompts in optimizer.py are used.
-    aiPromptSettings: v.optional(
-      v.object({
+    aiPromptSettings: v.optional(v.object({
+      en: v.optional(v.object({
         enhance: v.optional(v.string()),
         formalize: v.optional(v.string()),
         simplify: v.optional(v.string()),
         expand: v.optional(v.string()),
-      })
-    ),
+      })),
+      de: v.optional(v.object({
+        enhance: v.optional(v.string()),
+        formalize: v.optional(v.string()),
+        simplify: v.optional(v.string()),
+        expand: v.optional(v.string()),
+      })),
+    })),
   }),
 
   /// Freeform user-defined collections that papers can be tagged into.

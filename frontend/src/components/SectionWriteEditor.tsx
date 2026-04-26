@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2 } from "lucide-react";
@@ -28,7 +29,7 @@ import { useBaselinePrompts } from "@/hooks/useBaselinePrompts";
 import { resolvePrompt } from "@/lib/promptResolver";
 import { useLanguage } from "@/lib/LanguageContext";
 import { useProvider } from "@/lib/ProviderContext";
-import type { ActiveSection, CitationType, OptimizeMode, AiPromptSettings, AiPromptOverrides } from "@/lib/types";
+import type { ActiveSection, CitationType, OptimizeMode, AiPromptSettingsByLang, AiPromptOverridesByLang } from "@/lib/types";
 import "katex/dist/katex.min.css";
 import type { Doc } from "../../convex/_generated/dataModel";
 
@@ -46,6 +47,7 @@ interface SectionWriteEditorProps {
 export default function SectionWriteEditor({
   activeSection,
 }: SectionWriteEditorProps) {
+  const { t } = useTranslation();
   const { sectionId } = activeSection;
 
   // ── Data queries ──────────────────────────────────────────────────────
@@ -82,12 +84,13 @@ export default function SectionWriteEditor({
     (mode: OptimizeMode): string | undefined => {
       return resolvePrompt(
         mode,
+        language,
         baselines,
-        metadata?.aiPromptSettings as AiPromptSettings | undefined,
-        content?.aiPromptOverrides as AiPromptOverrides | undefined,
+        metadata?.aiPromptSettings as AiPromptSettingsByLang | undefined,
+        content?.aiPromptOverrides as AiPromptOverridesByLang | undefined,
       );
     },
-    [baselines, metadata?.aiPromptSettings, content?.aiPromptOverrides]
+    [baselines, language, metadata?.aiPromptSettings, content?.aiPromptOverrides]
   );
 
   // AI text optimization hook
@@ -470,10 +473,10 @@ export default function SectionWriteEditor({
     label: string;
     gerund: string;
   }[] = [
-    { mode: "enhance", icon: Sparkles, label: "Enhance", gerund: "Enhancing" },
-    { mode: "formalize", icon: GraduationCap, label: "Formalize", gerund: "Formalizing" },
-    { mode: "simplify", icon: Feather, label: "Simplify", gerund: "Simplifying" },
-    { mode: "expand", icon: Maximize2, label: "Expand", gerund: "Expanding" },
+    { mode: "enhance", icon: Sparkles, label: t("optimize.enhance"), gerund: t("optimize.enhancing") },
+    { mode: "formalize", icon: GraduationCap, label: t("optimize.formalize"), gerund: t("optimize.formalizing") },
+    { mode: "simplify", icon: Feather, label: t("optimize.simplify"), gerund: t("optimize.simplifying") },
+    { mode: "expand", icon: Maximize2, label: t("optimize.expand"), gerund: t("optimize.expanding") },
   ];
 
   /// Handles accepting the AI-optimized text and updating the editor body.
@@ -535,8 +538,7 @@ export default function SectionWriteEditor({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <p className="text-xs text-muted-foreground">
-            Type <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">@</kbd> to
-            insert a footnote citation
+            {t("optimize.typeAtToInsert")} <kbd className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono">@</kbd>
           </p>
           <button
             onClick={handleInsertFormula}
@@ -544,7 +546,7 @@ export default function SectionWriteEditor({
             title="Insert formula (LaTeX)"
           >
             <Sigma className="size-3" />
-            Formula
+            {t("optimize.formula")}
           </button>
         </div>
         <div className="flex items-center gap-3">
@@ -553,13 +555,13 @@ export default function SectionWriteEditor({
             {saveStatus === "saving" && (
               <>
                 <Loader2 className="size-3 animate-spin" />
-                Saving...
+                {t("common.saving")}
               </>
             )}
             {saveStatus === "saved" && (
               <>
                 <Check className="size-3 text-sage" />
-                Saved
+                {t("common.saved")}
               </>
             )}
           </span>
@@ -570,7 +572,7 @@ export default function SectionWriteEditor({
       {selection && optimizeState.status === "idle" && (
         <div className="flex items-center gap-1.5 px-1">
           <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider mr-1">
-            Optimize
+            {t("optimize.toolbar")}
           </span>
           {optimizeModes.map(({ mode, icon: Icon, label }) => (
             <button
@@ -587,7 +589,7 @@ export default function SectionWriteEditor({
           <button
             onClick={() => setPromptEditorOpen(true)}
             className="text-[11px] px-1.5 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors ml-1"
-            title="Customize AI prompts for this section"
+            title={t("optimize.customizePrompts")}
           >
             <Settings2 className="size-3" />
           </button>
@@ -599,7 +601,7 @@ export default function SectionWriteEditor({
         <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-amber/20 bg-amber/5">
           <Loader2 className="size-3 animate-spin text-amber" />
           <span className="text-[11px] text-amber-dim">
-            {optimizeModes.find((m) => m.mode === optimizeState.mode)?.gerund ?? "Optimizing"} selected text…
+            {optimizeModes.find((m) => m.mode === optimizeState.mode)?.gerund ?? t("optimize.optimizing")} selected text…
           </span>
         </div>
       )}
@@ -609,20 +611,20 @@ export default function SectionWriteEditor({
         <div className="rounded-lg border border-amber/20 bg-muted/10 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 border-b border-amber/10">
             <span className="text-[10px] font-medium text-amber-dim uppercase tracking-wider">
-              {optimizeState.mode} preview
+              {optimizeModes.find((m) => m.mode === optimizeState.mode)?.label} {t("optimize.preview")}
             </span>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDiscardOptimize}
                 className="text-[11px] px-3 py-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
               >
-                Discard
+                {t("optimize.discard")}
               </button>
               <button
                 onClick={handleAcceptOptimize}
                 className="text-[11px] px-3 py-0.5 rounded-full bg-amber/10 text-amber hover:bg-amber/20 transition-colors"
               >
-                Accept
+                {t("optimize.accept")}
               </button>
             </div>
           </div>
@@ -664,7 +666,7 @@ export default function SectionWriteEditor({
           onPaste={handlePaste}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
-          data-placeholder="Start writing your thesis text here..."
+          data-placeholder={t("optimize.startWriting")}
           suppressContentEditableWarning
           className={`w-full min-h-[400px] bg-transparent text-foreground/90 text-sm leading-relaxed rounded-lg border border-border/30 p-4 focus:outline-none focus:border-amber/30 transition-colors ${
             optimizeState.status !== "idle" ? "opacity-50" : ""
@@ -700,7 +702,7 @@ export default function SectionWriteEditor({
       {footnotes.length > 0 && (
         <div className="rounded-lg border border-border/30 p-4 bg-muted/10">
           <span className="text-[11px] font-medium text-amber-dim uppercase tracking-wider">
-            Fußnoten
+            {t("sectionWriteEditor.footnotes")}
           </span>
           <ol className="mt-2 space-y-1 list-none">
             {footnotes.map((fn) => (
@@ -721,8 +723,9 @@ export default function SectionWriteEditor({
         open={promptEditorOpen}
         onOpenChange={setPromptEditorOpen}
         sectionTitle={`${activeSection.orderNumber} ${activeSection.title}`}
-        aiPromptOverrides={content?.aiPromptOverrides as AiPromptOverrides | undefined}
-        globalSettings={metadata?.aiPromptSettings as AiPromptSettings | undefined}
+        language={language}
+        aiPromptOverrides={content?.aiPromptOverrides as AiPromptOverridesByLang | undefined}
+        globalSettings={metadata?.aiPromptSettings as AiPromptSettingsByLang | undefined}
         baselines={baselines}
         onChange={(overrides) => {
           updatePromptOverrides({

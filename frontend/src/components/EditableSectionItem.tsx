@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
@@ -20,6 +21,7 @@ export default function EditableSectionItem({
   onRemove,
   onRename,
 }: EditableSectionItemProps) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(node.title);
 
@@ -99,7 +101,7 @@ export default function EditableSectionItem({
             size="sm"
             className="h-6 w-6 p-0"
             onClick={() => onAdd(node.orderNumber)}
-            title="Add child section"
+            title={t("editableSection.addChild")}
           >
             <Plus className="size-3" />
           </Button>
@@ -108,7 +110,7 @@ export default function EditableSectionItem({
             size="sm"
             className="h-6 w-6 p-0"
             onClick={() => onRemove(node.orderNumber)}
-            title="Remove section"
+            title={t("editableSection.removeSection")}
           >
             <Trash2 className="size-3 text-destructive" />
           </Button>

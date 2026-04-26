@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -22,6 +23,7 @@ export default function ThesisSettingsModal({
   open,
   onOpenChange,
 }: ThesisSettingsModalProps) {
+  const { t } = useTranslation();
   const metadata = useQuery(api.thesisMetadata.getMetadata);
   const upsert = useMutation(api.thesisMetadata.upsertMetadata);
   const [saving, setSaving] = useState(false);
@@ -72,12 +74,12 @@ export default function ThesisSettingsModal({
     setSaving(true);
     try {
       await upsert({
-        studentName: studentName || "Unnamed",
+        studentName: studentName || t("thesisSettings.unnamed"),
         studentAddress: studentAddress || undefined,
         studentEmail: studentEmail || undefined,
         universityEmail: universityEmail || undefined,
         matrikelnummer: matrikelnummer || undefined,
-        titleDE: titleDE || "Untitled",
+        titleDE: titleDE || t("thesisSettings.untitled"),
         titleEN: titleEN || undefined,
         subtitleDE: subtitleDE || undefined,
         subtitleEN: subtitleEN || undefined,
@@ -115,65 +117,65 @@ export default function ThesisSettingsModal({
         className="!w-full !max-w-xl overflow-y-auto"
       >
         <SheetHeader>
-          <SheetTitle>Thesis Settings</SheetTitle>
+          <SheetTitle>{t("thesisSettings.title")}</SheetTitle>
           <SheetDescription>
-            Deckblatt, abstracts, and formatting metadata
+            {t("thesisSettings.description")}
           </SheetDescription>
         </SheetHeader>
 
         <div className="px-4 pb-6 space-y-6">
           {/* ── Personal Information ─────────────────────────────────── */}
-          <SettingsSection title="Personal Information">
-            <Field label="Full Name *" value={studentName} onChange={setStudentName} />
-            <Field label="Address" value={studentAddress} onChange={setStudentAddress} />
+          <SettingsSection title={t("thesisSettings.personalInfo")}>
+            <Field label={t("thesisSettings.fullName")} value={studentName} onChange={setStudentName} />
+            <Field label={t("thesisSettings.address")} value={studentAddress} onChange={setStudentAddress} />
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Private Email" value={studentEmail} onChange={setStudentEmail} />
-              <Field label="University Email" value={universityEmail} onChange={setUniversityEmail} />
+              <Field label={t("thesisSettings.privateEmail")} value={studentEmail} onChange={setStudentEmail} />
+              <Field label={t("thesisSettings.universityEmail")} value={universityEmail} onChange={setUniversityEmail} />
             </div>
-            <Field label="Matrikelnummer" value={matrikelnummer} onChange={setMatrikelnummer} />
+            <Field label={t("thesisSettings.studentId")} value={matrikelnummer} onChange={setMatrikelnummer} />
           </SettingsSection>
 
           {/* ── Thesis Information ───────────────────────────────────── */}
-          <SettingsSection title="Thesis Information">
-            <Field label="Title (German) *" value={titleDE} onChange={setTitleDE} />
-            <Field label="Title (English)" value={titleEN} onChange={setTitleEN} />
+          <SettingsSection title={t("thesisSettings.thesisInfo")}>
+            <Field label={t("thesisSettings.titleDE")} value={titleDE} onChange={setTitleDE} />
+            <Field label={t("thesisSettings.titleEN")} value={titleEN} onChange={setTitleEN} />
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Subtitle (German)" value={subtitleDE} onChange={setSubtitleDE} />
-              <Field label="Subtitle (English)" value={subtitleEN} onChange={setSubtitleEN} />
+              <Field label={t("thesisSettings.subtitleDE")} value={subtitleDE} onChange={setSubtitleDE} />
+              <Field label={t("thesisSettings.subtitleEN")} value={subtitleEN} onChange={setSubtitleEN} />
             </div>
-            <Field label="Studiengang" value={studiengang} onChange={setStudiengang} />
+            <Field label={t("thesisSettings.degreeProgram")} value={studiengang} onChange={setStudiengang} />
           </SettingsSection>
 
           {/* ── Supervisors ──────────────────────────────────────────── */}
-          <SettingsSection title="Supervisors">
-            <Field label="Erstprüfer (Titel, Vorname, Nachname)" value={erstpruefer} onChange={setErstpruefer} />
-            <Field label="Zweitprüfer (Titel, Vorname, Nachname)" value={zweitpruefer} onChange={setZweitpruefer} />
-            <Field label="Submission Date" value={abgabedatum} onChange={setAbgabedatum} type="date" />
+          <SettingsSection title={t("thesisSettings.supervisors")}>
+            <Field label={t("thesisSettings.firstExaminer")} value={erstpruefer} onChange={setErstpruefer} />
+            <Field label={t("thesisSettings.secondExaminer")} value={zweitpruefer} onChange={setZweitpruefer} />
+            <Field label={t("thesisSettings.submissionDate")} value={abgabedatum} onChange={setAbgabedatum} type="date" />
           </SettingsSection>
 
           {/* ── Abstracts ────────────────────────────────────────────── */}
-          <SettingsSection title="Abstracts">
+          <SettingsSection title={t("thesisSettings.abstracts")}>
             <TextareaField
-              label="Kurzfassung (German, ~10 lines)"
+              label={t("thesisSettings.abstractDE")}
               value={abstractDE}
               onChange={setAbstractDE}
             />
             <TextareaField
-              label="Abstract (English, ~10 lines)"
+              label={t("thesisSettings.abstractEN")}
               value={abstractEN}
               onChange={setAbstractEN}
             />
             <Field
-              label="Keywords (German, comma-separated, max 10)"
+              label={t("thesisSettings.keywordsDE")}
               value={keywordsDE}
               onChange={setKeywordsDE}
-              placeholder="e.g. Machine Learning, Datenanalyse, ..."
+              placeholder={t("thesisSettings.keywordsPlaceholderDE")}
             />
             <Field
-              label="Keywords (English, comma-separated, max 10)"
+              label={t("thesisSettings.keywordsEN")}
               value={keywordsEN}
               onChange={setKeywordsEN}
-              placeholder="e.g. Machine Learning, Data Analysis, ..."
+              placeholder={t("thesisSettings.keywordsPlaceholderEN")}
             />
           </SettingsSection>
 
@@ -188,7 +190,7 @@ export default function ThesisSettingsModal({
             ) : (
               <Save className="size-4 mr-2" />
             )}
-            Save Settings
+            {t("thesisSettings.saveSettings")}
           </Button>
         </div>
       </SheetContent>

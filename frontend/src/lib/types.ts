@@ -1,4 +1,5 @@
 import type { Id, Doc } from "../../convex/_generated/dataModel";
+import type { Language } from "./LanguageContext";
 
 /// Fixed colour palette for paper groups.
 export const GROUP_COLORS = [
@@ -216,6 +217,14 @@ export type AiPromptOverrides = {
   simplify?: AiPromptOverride;
   expand?: AiPromptOverride;
 };
+
+/// Global AI prompt settings keyed by language.
+/// Each language has its own independent set of mode overrides.
+export type AiPromptSettingsByLang = Partial<Record<Language, AiPromptSettings>>;
+
+/// Per-section AI prompt overrides keyed by language.
+/// Each language has its own independent set of per-mode overrides.
+export type AiPromptOverridesByLang = Partial<Record<Language, AiPromptOverrides>>;
 
 /// Maps processingStep values to user-friendly labels shown during paper processing.
 export const PROCESSING_STEP_LABELS: Record<string, string> = {

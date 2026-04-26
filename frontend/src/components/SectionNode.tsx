@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "convex/react";
 import { useDroppable } from "@dnd-kit/core";
 import { api } from "../../convex/_generated/api";
@@ -12,6 +13,7 @@ interface SectionNodeProps {
 }
 
 export default function SectionNode({ node, depth }: SectionNodeProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const matches = useQuery(api.matches.getMatchesBySection, {
     sectionId: node._id,
@@ -47,7 +49,7 @@ export default function SectionNode({ node, depth }: SectionNodeProps) {
             className="text-[10px] text-amber-dim/50 italic shrink-0"
             title={node.notes}
           >
-            (notes)
+            {t("sectionNode.notes")}
           </span>
         )}
         {paperCount > 0 && (

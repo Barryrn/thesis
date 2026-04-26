@@ -16,10 +16,18 @@ export const getMetadata = query({
 
 /// Convex validator for AI prompt settings — shared between mutations.
 const aiPromptSettingsValidator = v.object({
-  enhance: v.optional(v.string()),
-  formalize: v.optional(v.string()),
-  simplify: v.optional(v.string()),
-  expand: v.optional(v.string()),
+  en: v.optional(v.object({
+    enhance: v.optional(v.string()),
+    formalize: v.optional(v.string()),
+    simplify: v.optional(v.string()),
+    expand: v.optional(v.string()),
+  })),
+  de: v.optional(v.object({
+    enhance: v.optional(v.string()),
+    formalize: v.optional(v.string()),
+    simplify: v.optional(v.string()),
+    expand: v.optional(v.string()),
+  })),
 });
 
 /// Convex validator for citation settings — shared between mutations.

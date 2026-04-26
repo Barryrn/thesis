@@ -1,12 +1,15 @@
 /// Settings panel for global AI optimization prompt customization.
 /// Rendered inside ThesisPreviewModal's left sidebar when the
 /// Sparkles icon is toggled. Each mode has an editable textarea
-/// and a per-mode reset button.
+/// and a per-mode reset button. Edits are scoped to the active
+/// language — switching language shows/edits independent prompts.
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { OptimizeMode, AiPromptSettings } from "@/lib/types";
+import type { Language } from "@/lib/LanguageContext";
+import type { OptimizeMode, AiPromptSettings, AiPromptSettingsByLang } from "@/lib/types";
 
 /// Labels displayed above each mode's textarea.
 const MODE_LABELS: Record<OptimizeMode, string> = {
@@ -16,50 +19,62 @@ const MODE_LABELS: Record<OptimizeMode, string> = {
   expand: "Expand",
 };
 
+/// Human-readable language names for the editing label.
+const LANGUAGE_NAMES: Record<Language, string> = {
+  en: "English",
+  de: "Deutsch",
+};
+
 const MODES: OptimizeMode[] = ["enhance", "formalize", "simplify", "expand"];
 
 interface AiPromptsSettingsPanelProps {
-  /// Current global prompt overrides from Convex (may be undefined/sparse).
-  aiPromptSettings: AiPromptSettings | undefined;
-  /// Hardcoded baseline prompts fetched from the Python backend.
-  baselines: Record<OptimizeMode, string>;
-  /// Called with the updated settings object on every edit (caller debounces).
-  onChange: (settings: AiPromptSettings) => void;
-  /// Clears all global overrides, reverting every mode to baseline.
+  /// Active language — determines which language's prompts are shown/edited.
+  language: Language;
+  /// Current global prompt overrides from Convex (per-language).
+  aiPromptSettings: AiPromptSettingsByLang | undefined;
+  /// Hardcoded baseline prompts per language from the Python backend.
+  baselines: Record<Language, Record<OptimizeMode, string>>;
+  /// Called with the updated per-language settings on every edit.
+  onChange: (settings: AiPromptSettingsByLang) => void;
+  /// Clears the current language's overrides, reverting to baseline.
   onReset: () => void;
 }
 
-/// True when no mode has a custom global override.
+/// True when no mode has a custom global override for the given language.
 function isAllBaseline(settings: AiPromptSettings | undefined): boolean {
   if (!settings) return true;
   return MODES.every((m) => !settings[m]?.trim());
 }
 
 export default function AiPromptsSettingsPanel({
+  language,
   aiPromptSettings,
   baselines,
   onChange,
   onReset,
 }: AiPromptsSettingsPanelProps) {
-  const allDefault = isAllBaseline(aiPromptSettings);
+  const { t } = useTranslation();
+  const langSettings = aiPromptSettings?.[language];
+  const langBaselines = baselines[language] ?? baselines.en;
+  const allDefault = isAllBaseline(langSettings);
 
-  /// Updates a single mode's global prompt override.
-  /// Only persists when the value actually differs from the baseline.
+  /// Updates a single mode's global prompt override for the active language.
   const updateMode = useCallback(
     (mode: OptimizeMode, value: string) => {
-      // If the user typed the baseline text back, treat it as "no override".
-      const effective = value.trim() === baselines[mode].trim() ? undefined : value;
-      onChange({ ...aiPromptSettings, [mode]: effective });
+      const effective = value.trim() === langBaselines[mode].trim() ? undefined : value;
+      const updatedLang: AiPromptSettings = { ...langSettings, [mode]: effective };
+      onChange({ ...aiPromptSettings, [language]: updatedLang });
     },
-    [aiPromptSettings, baselines, onChange]
+    [langSettings, langBaselines, onChange, aiPromptSettings, language]
   );
 
-  /// Resets a single mode to baseline (clears its global override).
+  /// Resets a single mode to baseline for the active language.
   const resetMode = useCallback(
     (mode: OptimizeMode) => {
-      onChange({ ...aiPromptSettings, [mode]: undefined });
+      const updatedLang: AiPromptSettings = { ...langSettings, [mode]: undefined };
+      onChange({ ...aiPromptSettings, [language]: updatedLang });
     },
-    [aiPromptSettings, onChange]
+    [langSettings, onChange, aiPromptSettings, language]
   );
 
   return (
@@ -67,18 +82,21 @@ export default function AiPromptsSettingsPanel({
       {/* Header */}
       <div>
         <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-          AI Prompts
+          {t("promptEditor.aiPrompts")}
         </p>
         <span className="text-[10px] text-amber/80 font-medium">
-          {allDefault ? "All Baseline" : "Custom"}
+          {allDefault ? t("promptEditor.allBaseline") : t("promptEditor.custom")}
         </span>
+        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+          {t("prompts.editingFor", { language: LANGUAGE_NAMES[language] })}
+        </p>
       </div>
 
       {/* Per-mode prompt editors */}
       {MODES.map((mode) => {
-        const customValue = aiPromptSettings?.[mode];
+        const customValue = langSettings?.[mode];
         const isCustom = !!customValue?.trim();
-        const displayValue = isCustom ? customValue : baselines[mode];
+        const displayValue = isCustom ? customValue : langBaselines[mode];
 
         return (
           <div key={mode}>
@@ -94,13 +112,13 @@ export default function AiPromptsSettingsPanel({
                       : "bg-muted/50 text-muted-foreground"
                   }`}
                 >
-                  {isCustom ? "Custom" : "Default"}
+                  {isCustom ? t("promptEditor.custom") : t("promptEditor.default")}
                 </span>
                 {isCustom && (
                   <button
                     onClick={() => resetMode(mode)}
                     className="text-muted-foreground hover:text-foreground transition-colors"
-                    title="Reset to baseline"
+                    title={t("promptEditor.resetToBaseline")}
                   >
                     <RotateCcw className="size-3" />
                   </button>
@@ -131,7 +149,7 @@ export default function AiPromptsSettingsPanel({
         disabled={allDefault}
       >
         <RotateCcw className="size-3 mr-1" />
-        Reset All to Baseline
+        {t("promptEditor.resetAllToBaseline")}
       </Button>
     </div>
   );

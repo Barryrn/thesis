@@ -2,6 +2,7 @@
 /// Accessible via Cmd+K / Ctrl+K or the search icon in the Dashboard header.
 /// Uses client-side filtering on the full excerpt list fetched from Convex.
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -43,6 +44,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 }
 
 export default function SearchModal({ onClose, onSelectSection }: SearchModalProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -107,7 +109,7 @@ export default function SearchModal({ onClose, onSelectSection }: SearchModalPro
         className="relative w-full max-w-lg bg-card border border-border/50 rounded-xl shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
-        aria-label="Search excerpts"
+        aria-label={t("searchModal.ariaLabel")}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
@@ -118,20 +120,20 @@ export default function SearchModal({ onClose, onSelectSection }: SearchModalPro
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search excerpts..."
+            placeholder={t("searchModal.searchExcerpts")}
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
           />
           {query && (
             <button
               onClick={() => setQuery("")}
               className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Clear search"
+              aria-label={t("searchModal.clearSearch")}
             >
               <X className="size-3.5" />
             </button>
           )}
           <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] text-muted-foreground/60 bg-muted/30 rounded border border-border/30 font-mono">
-            ESC
+            {t("searchModal.esc")}
           </kbd>
         </div>
 
@@ -141,13 +143,13 @@ export default function SearchModal({ onClose, onSelectSection }: SearchModalPro
             <div className="px-4 py-8 text-center">
               <Quote className="size-5 text-muted-foreground/30 mx-auto mb-2" />
               <p className="text-sm text-muted-foreground/60">
-                Type to search across all excerpts
+                {t("searchModal.typeToSearch")}
               </p>
             </div>
           ) : filteredResults.length === 0 ? (
             <div className="px-4 py-8 text-center">
               <p className="text-sm text-muted-foreground">
-                No excerpts match "{debouncedQuery}"
+                {t("searchModal.noResults", { query: debouncedQuery })}
               </p>
             </div>
           ) : (
@@ -187,7 +189,7 @@ export default function SearchModal({ onClose, onSelectSection }: SearchModalPro
               {filteredResults.length > MAX_VISIBLE * 3 && (
                 <div className="px-4 py-2 text-center">
                   <p className="text-[11px] text-muted-foreground/50">
-                    {filteredResults.length - MAX_VISIBLE * 3} more results — refine your search
+                    {t("searchModal.moreResults", { count: filteredResults.length - MAX_VISIBLE * 3 })}
                   </p>
                 </div>
               )}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
@@ -10,7 +11,8 @@ import {
 import { Loader2, Settings, Sparkles } from "lucide-react";
 import { compileDocument, DEFAULT_LAYOUT, DEFAULT_CITATION } from "@/lib/documentCompiler";
 import type { FigureDoc, PaperDoc, LayoutSettings, CitationSettings } from "@/lib/documentCompiler";
-import type { AiPromptSettings } from "@/lib/types";
+import type { AiPromptSettingsByLang } from "@/lib/types";
+import { useLanguage } from "@/lib/LanguageContext";
 import LayoutSettingsPanel from "./LayoutSettingsPanel";
 import AiPromptsSettingsPanel from "./AiPromptsSettingsPanel";
 import { useBaselinePrompts } from "@/hooks/useBaselinePrompts";
@@ -62,6 +64,8 @@ export default function ThesisPreviewModal({
   open,
   onOpenChange,
 }: ThesisPreviewModalProps) {
+  const { t } = useTranslation();
+  const { language } = useLanguage();
   const data = useQuery(api.thesisExport.getThesisData);
   const contentRef = useRef<HTMLDivElement>(null);
   /// Which sidebar panel is active: "none" | "layout" | "ai".
@@ -107,7 +111,7 @@ export default function ThesisPreviewModal({
 
   /// Debounced auto-save of AI prompt settings to Convex.
   const handleAiPromptsChange = useCallback(
-    (newSettings: AiPromptSettings) => {
+    (newSettings: AiPromptSettingsByLang) => {
       if (aiPromptsSaveRef.current) clearTimeout(aiPromptsSaveRef.current);
       aiPromptsSaveRef.current = setTimeout(() => {
         updateAiPromptsMutation({ aiPromptSettings: newSettings });
@@ -116,13 +120,14 @@ export default function ThesisPreviewModal({
     [updateAiPromptsMutation]
   );
 
-  /// Clears all global AI prompt overrides, reverting to baselines.
+  /// Clears the current language's global AI prompt overrides.
   const handleAiPromptsReset = useCallback(() => {
     if (aiPromptsSaveRef.current) clearTimeout(aiPromptsSaveRef.current);
+    const current = data?.metadata?.aiPromptSettings as AiPromptSettingsByLang | undefined;
     updateAiPromptsMutation({
-      aiPromptSettings: {},
+      aiPromptSettings: { ...current, [language]: undefined },
     });
-  }, [updateAiPromptsMutation]);
+  }, [updateAiPromptsMutation, data?.metadata?.aiPromptSettings, language]);
 
   /// Resets layout and citation settings to HKA defaults.
   const handleReset = useCallback(() => {
@@ -178,15 +183,15 @@ export default function ThesisPreviewModal({
   /// Only renders fields that have a non-empty value.
   const titleInfoFields = compiled
     ? [
-        { label: "Name", value: compiled.titlePage.studentName },
-        { label: "Adresse", value: compiled.titlePage.studentAddress },
-        { label: "E-Mail (privat)", value: compiled.titlePage.studentEmail },
-        { label: "E-Mail (Hochschule)", value: compiled.titlePage.universityEmail },
-        { label: "Matrikelnummer", value: compiled.titlePage.matrikelnummer },
-        { label: "Studiengang", value: compiled.titlePage.studiengang },
-        { label: "Erstprüfer", value: compiled.titlePage.erstpruefer },
-        { label: "Zweitprüfer", value: compiled.titlePage.zweitpruefer },
-        { label: "Abgabedatum", value: compiled.titlePage.abgabedatum },
+        { label: t("thesisPreviewFull.fieldName"), value: compiled.titlePage.studentName },
+        { label: t("thesisPreviewFull.fieldAddress"), value: compiled.titlePage.studentAddress },
+        { label: t("thesisPreviewFull.fieldEmailPrivate"), value: compiled.titlePage.studentEmail },
+        { label: t("thesisPreviewFull.fieldEmailUni"), value: compiled.titlePage.universityEmail },
+        { label: t("thesisPreviewFull.fieldMatrikelnummer"), value: compiled.titlePage.matrikelnummer },
+        { label: t("thesisPreviewFull.fieldStudiengang"), value: compiled.titlePage.studiengang },
+        { label: t("thesisPreviewFull.fieldErstpruefer"), value: compiled.titlePage.erstpruefer },
+        { label: t("thesisPreviewFull.fieldZweitpruefer"), value: compiled.titlePage.zweitpruefer },
+        { label: t("thesisPreviewFull.fieldAbgabedatum"), value: compiled.titlePage.abgabedatum },
       ].filter((f) => f.value)
     : [];
 
@@ -228,7 +233,7 @@ export default function ThesisPreviewModal({
         className="!w-full !max-w-5xl overflow-hidden flex flex-col"
       >
         <SheetHeader className="shrink-0 flex flex-row items-center gap-2 pr-12">
-          <SheetTitle>Thesis Preview</SheetTitle>
+          <SheetTitle>{t("thesisPreviewFull.title")}</SheetTitle>
           <div className="ml-auto flex items-center gap-1">
             <button
               onClick={() =>
@@ -239,7 +244,7 @@ export default function ThesisPreviewModal({
                   ? "bg-amber/20 text-amber"
                   : "text-muted-foreground hover:text-foreground"
               }`}
-              title="AI prompt settings"
+              title={t("thesisPreviewFull.aiPromptSettings")}
             >
               <Sparkles className="size-4" />
             </button>
@@ -252,7 +257,7 @@ export default function ThesisPreviewModal({
                   ? "bg-amber/20 text-amber"
                   : "text-muted-foreground hover:text-foreground"
               }`}
-              title="Layout settings"
+              title={t("thesisPreviewFull.layoutSettings")}
             >
               <Settings className="size-4" />
             </button>
@@ -276,7 +281,8 @@ export default function ThesisPreviewModal({
               />
             ) : activePanel === "ai" ? (
               <AiPromptsSettingsPanel
-                aiPromptSettings={data?.metadata?.aiPromptSettings as AiPromptSettings | undefined}
+                language={language}
+                aiPromptSettings={data?.metadata?.aiPromptSettings as AiPromptSettingsByLang | undefined}
                 baselines={baselines}
                 onChange={handleAiPromptsChange}
                 onReset={handleAiPromptsReset}
@@ -284,7 +290,7 @@ export default function ThesisPreviewModal({
             ) : (
               <nav className="w-48 shrink-0 border-r border-border/30 overflow-y-auto p-3 space-y-0.5">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                  Navigation
+                  {t("thesisPreviewFull.navigation")}
                 </p>
                 {compiled.tableOfContents.map((entry) => (
                   <button
@@ -312,7 +318,7 @@ export default function ThesisPreviewModal({
               <div className="hka-page">
                 <div className="hka-preview">
                   <div className="hka-title-page">
-                    <div className="thesis-type">Masterarbeit</div>
+                    <div className="thesis-type">{t("thesisPreviewFull.masterThesis")}</div>
                     <div className="thesis-title">
                       {compiled.titlePage.titleDE}
                     </div>
@@ -332,8 +338,7 @@ export default function ThesisPreviewModal({
                       </div>
                     )}
                     <div className="thesis-vorlage">
-                      Masterarbeit vorgelegt zur Erlangung des Mastergrades der
-                      Hochschule Karlsruhe – Technik und Wirtschaft
+                      {t("thesisPreviewFull.submittedFor")}
                     </div>
                     <div className="thesis-info">
                       {titleInfoFields.map(({ label, value }) => (
@@ -354,11 +359,11 @@ export default function ThesisPreviewModal({
                   <div className="hka-page-number">{formatPageNum(romanCounter++, layout.pageNumbering.format, "front")}</div>
                   <div className="hka-preview">
                     <div className="hka-abstract">
-                      <h1>Kurzfassung</h1>
+                      <h1>{t("thesisPreviewFull.abstractDE")}</h1>
                       <p>{compiled.abstractDE}</p>
                       {compiled.keywordsDE.length > 0 && (
                         <p className="keywords">
-                          <strong>Schlüsselbegriffe:</strong>{" "}
+                          <strong>{t("thesisPreviewFull.keywordsDE")}</strong>{" "}
                           {compiled.keywordsDE.join(", ")}
                         </p>
                       )}
@@ -366,11 +371,11 @@ export default function ThesisPreviewModal({
 
                     {compiled.abstractEN && (
                       <div className="hka-abstract" style={{ marginTop: "1cm" }}>
-                        <h1>Abstract</h1>
+                        <h1>{t("thesisPreviewFull.abstractEN")}</h1>
                         <p>{compiled.abstractEN}</p>
                         {compiled.keywordsEN.length > 0 && (
                           <p className="keywords">
-                            <strong>Keywords:</strong>{" "}
+                            <strong>{t("thesisPreviewFull.keywordsEN")}</strong>{" "}
                             {compiled.keywordsEN.join(", ")}
                           </p>
                         )}
@@ -384,7 +389,7 @@ export default function ThesisPreviewModal({
               <div className="hka-page">
                 <div className="hka-page-number">{formatPageNum(romanCounter++, layout.pageNumbering.format, "front")}</div>
                 <div className="hka-preview">
-                  <h1>Inhaltsverzeichnis</h1>
+                  <h1>{t("thesisPreviewFull.toc")}</h1>
                   <div>
                     {compiled.tableOfContents.map((entry) => (
                       <div
@@ -404,11 +409,11 @@ export default function ThesisPreviewModal({
                 <div className="hka-page">
                   <div className="hka-page-number">{formatPageNum(romanCounter++, layout.pageNumbering.format, "front")}</div>
                   <div className="hka-preview">
-                    <h1>Abbildungsverzeichnis</h1>
+                    <h1>{t("thesisPreviewFull.listOfFigures")}</h1>
                     <div>
                       {compiled.listOfFigures.map((fig) => (
                         <div key={fig.figureNumber} className="hka-toc-entry depth-0">
-                          <span className="toc-number">Abb. {fig.figureNumber}</span>
+                          <span className="toc-number">{t("thesisPreviewFull.figureAbbr", { number: fig.figureNumber })}</span>
                           <span className="toc-title">{fig.caption}</span>
                         </div>
                       ))}
@@ -475,7 +480,7 @@ export default function ThesisPreviewModal({
                 <div className="hka-page">
                   <div className="hka-page-number">{formatPageNum(arabicCounter++, layout.pageNumbering.format, "main")}</div>
                   <div className="hka-preview">
-                    <h1>Literaturverzeichnis</h1>
+                    <h1>{t("thesisPreview.bibliography")}</h1>
                     {compiled.bibliography.map((entry, i) => (
                       <div key={i} className="hka-bib-entry">
                         {entry.kuerzel && (
@@ -492,12 +497,12 @@ export default function ThesisPreviewModal({
               <div className="hka-page">
                 <div className="hka-page-number">{formatPageNum(arabicCounter++, layout.pageNumbering.format, "main")}</div>
                 <div className="hka-preview">
-                  <h1>Eidesstattliche Erklärung</h1>
+                  <h1>{t("thesisPreview.declaration")}</h1>
                   <div className="hka-declaration">
                     <p>{compiled.declarationText}</p>
                     <div className="signature-line">
-                      <span>Ort, Datum</span>
-                      <span>Unterschrift</span>
+                      <span>{t("thesisPreview.locationDate")}</span>
+                      <span>{t("thesisPreview.signature")}</span>
                     </div>
                   </div>
                 </div>

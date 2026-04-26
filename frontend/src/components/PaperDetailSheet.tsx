@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,7 @@ export default function PaperDetailSheet({
   authors,
   year,
 }: PaperDetailSheetProps) {
+  const { t } = useTranslation();
   const summary = useQuery(api.summaries.getSummaryByPaper, { paperId });
   const identifiers = useQuery(api.summaries.getIdentifiersByPaper, {
     paperId,
@@ -32,7 +34,7 @@ export default function PaperDetailSheet({
       <SheetHeader>
         <SheetTitle className="text-lg">{title}</SheetTitle>
         <SheetDescription>
-          {authors.length > 0 ? authors.join(", ") : "Unknown authors"}
+          {authors.length > 0 ? authors.join(", ") : t("documentPreview.unknownAuthors")}
           {year && ` (${year})`}
         </SheetDescription>
       </SheetHeader>
@@ -41,7 +43,7 @@ export default function PaperDetailSheet({
         {identifiers && identifiers.length > 0 && (
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-2">
-              Identifiers
+              {t("paperDetail.identifiers")}
             </h3>
             <div className="space-y-1">
               {identifiers.map((id) => (
@@ -58,13 +60,13 @@ export default function PaperDetailSheet({
 
         {summary === undefined && (
           <div className="text-sm text-muted-foreground">
-            Loading summary...
+            {t("paperDetail.loadingSummary")}
           </div>
         )}
 
         {summary === null && (
           <div className="text-sm text-muted-foreground">
-            Paper has not been processed yet.
+            {t("paperDetail.notProcessed")}
           </div>
         )}
 
@@ -73,7 +75,7 @@ export default function PaperDetailSheet({
             {summary.keywords.length > 0 && (
               <section>
                 <h3 className="text-sm font-medium text-muted-foreground mb-2">
-                  Keywords
+                  {t("paperDetail.keywords")}
                 </h3>
                 <div className="flex flex-wrap gap-1.5">
                   {summary.keywords.map((kw) => (
@@ -87,21 +89,21 @@ export default function PaperDetailSheet({
 
             <section>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">
-                Research Question
+                {t("paperDetail.researchQuestion")}
               </h3>
               <p className="text-sm">{summary.researchQuestion}</p>
             </section>
 
             <section>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">
-                Methodology
+                {t("paperDetail.methodology")}
               </h3>
               <p className="text-sm">{summary.methodology}</p>
             </section>
 
             <section>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">
-                Key Findings
+                {t("paperDetail.keyFindings")}
               </h3>
               <ul className="list-disc list-inside space-y-1 text-sm">
                 {summary.keyFindings.map((finding, i) => (

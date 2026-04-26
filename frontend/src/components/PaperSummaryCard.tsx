@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -43,25 +44,27 @@ interface PaperSummaryCardProps {
   sortable?: boolean;
 }
 
+/// Returns a translation key and styling class for the relevance score badge.
 function getScoreBadge(score: number) {
   if (score >= 0.7)
     return {
-      label: "Strong",
+      tKey: "paperCard.strong",
       className: "bg-sage/20 text-sage border-sage/30",
     };
   if (score >= 0.5)
     return {
-      label: "Possible",
+      tKey: "paperCard.possible",
       className: "bg-amber/15 text-amber border-amber/30",
     };
   return {
-    label: "Weak",
+    tKey: "paperCard.weak",
     className: "bg-destructive/15 text-destructive border-destructive/30",
   };
 }
 
-function formatAuthors(authors: string[]): string {
-  if (authors.length === 0) return "Unknown authors";
+/// Formats author list for display; accepts a fallback string for empty lists.
+function formatAuthors(authors: string[], unknownLabel: string): string {
+  if (authors.length === 0) return unknownLabel;
   if (authors.length <= 2) return authors.join(", ");
   return `${authors[0]}, ${authors[1]} et al.`;
 }
@@ -99,17 +102,6 @@ function CollapsibleSection({
     </div>
   );
 }
-
-// --- Source type labels for the dropdown ---
-
-/// Human-readable labels for each source type, following HKA bibliography rules.
-const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
-  book: "Buch",
-  bookChapter: "Buchkapitel (Sammelband)",
-  journalArticle: "Zeitschriftenaufsatz",
-  newspaperArticle: "Zeitungsartikel",
-  internetSource: "Internetquelle",
-};
 
 /// All source type options in display order.
 const SOURCE_TYPE_OPTIONS: SourceType[] = [
@@ -171,6 +163,7 @@ function emptyFormState(): SourceFormState {
 /// Inline editor for paper metadata (title, authors, year, DOI).
 /// Allows users to correct auto-extracted metadata from the PDF.
 function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
+  const { t } = useTranslation();
   const paper = useQuery(api.papers.getPaper, { paperId });
   const identifiers = useQuery(api.summaries.getIdentifiersByPaper, { paperId });
   const updateMetadata = useMutation(api.papers.updatePaperMetadata);
@@ -256,27 +249,27 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
-            Titel
+            {t("common.title")}
           </span>
           <button
             onClick={() => setIsEditing(true)}
             className="text-muted-foreground/40 hover:text-amber transition-colors"
-            title="Metadaten bearbeiten"
+            title={t("paperSummaryCard.editMetadata")}
           >
             <Pencil className="size-3" />
           </button>
         </div>
         <p className="text-sm text-foreground/80">{paper.title}</p>
         <span className="text-[11px] text-muted-foreground uppercase tracking-wider block mt-2">
-          Autoren
+          {t("common.authors")}
         </span>
         <p className="text-sm text-foreground/80">
-          {paper.authors.join(", ") || "Keine Autoren"}
+          {paper.authors.join(", ") || t("paperSummaryCard.noAuthors")}
         </p>
         <div className="flex gap-8 mt-2">
           <div>
             <span className="text-[11px] text-muted-foreground uppercase tracking-wider block">
-              Jahr
+              {t("common.year")}
             </span>
             <p className="text-sm text-foreground/80">
               {paper.year ?? "–"}
@@ -284,7 +277,7 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
           </div>
           <div>
             <span className="text-[11px] text-muted-foreground uppercase tracking-wider block">
-              DOI
+              {t("common.doi")}
             </span>
             <p className="text-sm text-foreground/80">
               {currentDoi || "–"}
@@ -299,7 +292,7 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
     <div className="space-y-3">
       <div>
         <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
-          Titel
+          {t("common.title")}
         </label>
         <input
           type="text"
@@ -310,7 +303,7 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
       </div>
       <div>
         <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
-          Autoren (kommagetrennt)
+          {t("paperSummaryCard.authorsCommaSeparated")}
         </label>
         <input
           type="text"
@@ -323,7 +316,7 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
-            Jahr
+            {t("common.year")}
           </label>
           <input
             type="text"
@@ -335,7 +328,7 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
         </div>
         <div>
           <label className="text-[11px] text-muted-foreground uppercase tracking-wider block mb-1">
-            DOI
+            {t("common.doi")}
           </label>
           <input
             type="text"
@@ -352,13 +345,13 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
           disabled={saving}
           className="text-[11px] px-3 py-1 rounded-full bg-amber/10 text-amber hover:bg-amber/20 transition-colors disabled:opacity-50"
         >
-          {saving ? "Speichern..." : "Speichern"}
+          {saving ? t("common.saving") : t("common.save")}
         </button>
         <button
           onClick={() => setIsEditing(false)}
           className="text-[11px] px-3 py-1 rounded-full text-muted-foreground hover:text-foreground transition-colors"
         >
-          Abbrechen
+          {t("common.cancel")}
         </button>
       </div>
     </div>
@@ -371,6 +364,7 @@ function PaperMetadataForm({ paperId }: { paperId: Id<"papers"> }) {
 /// Loads source data from Convex, provides type-specific fields, and
 /// supports DOI-based metadata auto-fill via the Python service.
 function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
+  const { t } = useTranslation();
   const source = useQuery(api.sources.getSourceByPaper, { paperId });
   const identifiers = useQuery(api.summaries.getIdentifiersByPaper, { paperId });
   const updateSource = useMutation(api.sources.updateSource);
@@ -552,7 +546,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
     return (
       <div className="flex items-center gap-2 py-2">
         <Loader2 className="size-3 animate-spin text-muted-foreground" />
-        <span className="text-[11px] text-muted-foreground">Loading source...</span>
+        <span className="text-[11px] text-muted-foreground">{t("paperCard.loadingSource")}</span>
       </div>
     );
   }
@@ -561,7 +555,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
   if (source === null) {
     return (
       <p className="text-[11px] text-muted-foreground/60 italic py-1">
-        No source details available.
+        {t("paperCard.noSourceDetails")}
       </p>
     );
   }
@@ -576,7 +570,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
             [{form.kuerzel}]
           </span>
           <span className="text-[11px] text-muted-foreground">
-            {SOURCE_TYPE_LABELS[form.sourceType]}
+            {t(`sourceTypes.${form.sourceType}`)}
           </span>
         </div>
 
@@ -584,20 +578,20 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
         <div className="text-sm text-foreground/70 space-y-0.5">
           {form.publisher && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Verlag:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.publisherLabel")}</span>{" "}
               {form.publisher}
               {form.publisherLocation && `, ${form.publisherLocation}`}
             </p>
           )}
           {form.edition && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Auflage:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.editionLabel")}</span>{" "}
               {form.edition}
             </p>
           )}
           {form.journalName && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Zeitschrift:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.journalLabel")}</span>{" "}
               {form.journalName}
               {form.volume && `, Vol. ${form.volume}`}
               {form.issue && ` (${form.issue})`}
@@ -605,32 +599,32 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
           )}
           {(form.pageStart || form.pageEnd) && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Seiten:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.pagesLabel")}</span>{" "}
               {form.pageStart}
               {form.pageEnd && `–${form.pageEnd}`}
             </p>
           )}
           {form.editorNames && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Hrsg.:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.editorsLabel")}</span>{" "}
               {form.editorNames}
             </p>
           )}
           {form.editorBookTitle && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Buchtitel:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.bookTitleLabel")}</span>{" "}
               {form.editorBookTitle}
             </p>
           )}
           {form.newspaperName && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Zeitung:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.newspaperLabel")}</span>{" "}
               {form.newspaperName}
             </p>
           )}
           {form.publishDate && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Datum:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.dateLabel")}</span>{" "}
               {form.publishDate}
             </p>
           )}
@@ -649,7 +643,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
           )}
           {form.accessDate && (
             <p>
-              <span className="text-muted-foreground text-[11px]">Zugriff:</span>{" "}
+              <span className="text-muted-foreground text-[11px]">{t("paperSummaryCard.accessDateLabel")}</span>{" "}
               {form.accessDate}
             </p>
           )}
@@ -660,12 +654,12 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
           onClick={() => setIsEditing(true)}
           className="flex items-center gap-1 text-[11px] text-amber-dim/60 hover:text-amber transition-colors"
         >
-          <Pencil className="size-3" /> Bearbeiten
+          <Pencil className="size-3" /> {t("common.edit")}
         </button>
 
         {/* Brief save confirmation */}
         {saveSuccess && (
-          <span className="text-[11px] text-sage ml-2">Gespeichert</span>
+          <span className="text-[11px] text-sage ml-2">{t("common.saved")}</span>
         )}
       </div>
     );
@@ -677,7 +671,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
       {/* Kuerzel row */}
       <div>
         <label className="text-[11px] text-muted-foreground uppercase tracking-wider">
-          Kürzel
+          {t("paperSummaryCard.abbreviation")}
         </label>
         <div className="flex items-center gap-2 mt-1">
           {editingKuerzel ? (
@@ -700,9 +694,9 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
               <button
                 onClick={handleAutoGenerateKuerzel}
                 className="text-[11px] text-amber-dim/60 hover:text-amber transition-colors flex items-center gap-1"
-                title="Auto-generate from authors + year"
+                title={t("paperCard.autoGenerate")}
               >
-                <RotateCcw className="size-3" /> Auto
+                <RotateCcw className="size-3" /> {t("paperCard.auto")}
               </button>
             </>
           ) : (
@@ -724,7 +718,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
       {/* Source type dropdown */}
       <div>
         <label className="text-[11px] text-muted-foreground uppercase tracking-wider">
-          Quellentyp
+          {t("paperSummaryCard.sourceType")}
         </label>
         <select
           value={form.sourceType}
@@ -733,7 +727,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
         >
           {SOURCE_TYPE_OPTIONS.map((type) => (
             <option key={type} value={type}>
-              {SOURCE_TYPE_LABELS[type]}
+              {t(`sourceTypes.${type}`)}
             </option>
           ))}
         </select>
@@ -752,7 +746,7 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
             ) : (
               <BookOpen className="size-3" />
             )}
-            Metadaten laden
+            {t("paperSummaryCard.loadMetadata")}
           </button>
           {lookupError && (
             <p className="text-[11px] text-destructive mt-1">{lookupError}</p>
@@ -766,17 +760,17 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
       {form.sourceType === "book" && (
         <>
           <SourceField
-            label="Verlag"
+            label={t("common.publisher")}
             value={form.publisher}
             onChange={(v) => setField("publisher", v)}
           />
           <SourceField
-            label="Verlagsort"
+            label={t("common.publisherPlace")}
             value={form.publisherLocation}
             onChange={(v) => setField("publisherLocation", v)}
           />
           <SourceField
-            label="Auflage"
+            label={t("common.edition")}
             value={form.edition}
             onChange={(v) => setField("edition", v)}
           />
@@ -787,33 +781,33 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
       {form.sourceType === "bookChapter" && (
         <>
           <SourceField
-            label="Verlag"
+            label={t("common.publisher")}
             value={form.publisher}
             onChange={(v) => setField("publisher", v)}
           />
           <SourceField
-            label="Verlagsort"
+            label={t("common.publisherPlace")}
             value={form.publisherLocation}
             onChange={(v) => setField("publisherLocation", v)}
           />
           <SourceField
-            label="Herausgeber (kommagetrennt)"
+            label={t("paperSummaryCard.editorsCommaSeparated")}
             value={form.editorNames}
             onChange={(v) => setField("editorNames", v)}
           />
           <SourceField
-            label="Buchtitel (Sammelband)"
+            label={t("paperSummaryCard.bookTitleAnthology")}
             value={form.editorBookTitle}
             onChange={(v) => setField("editorBookTitle", v)}
           />
           <div className="grid grid-cols-2 gap-2">
             <SourceField
-              label="Seite von"
+              label={t("paperSummaryCard.pageFrom")}
               value={form.pageStart}
               onChange={(v) => setField("pageStart", v)}
             />
             <SourceField
-              label="Seite bis"
+              label={t("paperSummaryCard.pageTo")}
               value={form.pageEnd}
               onChange={(v) => setField("pageEnd", v)}
             />
@@ -825,30 +819,30 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
       {form.sourceType === "journalArticle" && (
         <>
           <SourceField
-            label="Zeitschrift"
+            label={t("paperSummaryCard.journal")}
             value={form.journalName}
             onChange={(v) => setField("journalName", v)}
           />
           <div className="grid grid-cols-2 gap-2">
             <SourceField
-              label="Band (Volume)"
+              label={t("paperSummaryCard.volume")}
               value={form.volume}
               onChange={(v) => setField("volume", v)}
             />
             <SourceField
-              label="Ausgabe (Issue)"
+              label={t("paperSummaryCard.issue")}
               value={form.issue}
               onChange={(v) => setField("issue", v)}
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <SourceField
-              label="Seite von"
+              label={t("paperSummaryCard.pageFrom")}
               value={form.pageStart}
               onChange={(v) => setField("pageStart", v)}
             />
             <SourceField
-              label="Seite bis"
+              label={t("paperSummaryCard.pageTo")}
               value={form.pageEnd}
               onChange={(v) => setField("pageEnd", v)}
             />
@@ -860,12 +854,12 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
       {form.sourceType === "newspaperArticle" && (
         <>
           <SourceField
-            label="Zeitung"
+            label={t("paperSummaryCard.newspaper")}
             value={form.newspaperName}
             onChange={(v) => setField("newspaperName", v)}
           />
           <SourceField
-            label="Erscheinungsdatum"
+            label={t("paperSummaryCard.publicationDate")}
             value={form.publishDate}
             onChange={(v) => setField("publishDate", v)}
           />
@@ -876,12 +870,12 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
       {form.sourceType === "internetSource" && (
         <>
           <SourceField
-            label="URL"
+            label={t("common.url")}
             value={form.url}
             onChange={(v) => setField("url", v)}
           />
           <SourceField
-            label="Zugriffsdatum"
+            label={t("paperSummaryCard.accessDate")}
             value={form.accessDate}
             onChange={(v) => setField("accessDate", v)}
           />
@@ -896,16 +890,16 @@ function SourceEditForm({ paperId }: { paperId: Id<"papers"> }) {
           className="bg-amber/10 text-amber hover:bg-amber/20 rounded px-3 py-1 text-[11px] transition-colors disabled:opacity-50 flex items-center gap-1"
         >
           {saving ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
-          Speichern
+          {t("common.save")}
         </button>
         <button
           onClick={() => setIsEditing(false)}
           className="text-muted-foreground hover:text-foreground text-[11px] transition-colors flex items-center gap-1"
         >
-          <X className="size-3" /> Abbrechen
+          <X className="size-3" /> {t("common.cancel")}
         </button>
         {saveSuccess && (
-          <span className="text-[11px] text-sage">Gespeichert</span>
+          <span className="text-[11px] text-sage">{t("common.saved")}</span>
         )}
       </div>
     </div>
@@ -1055,6 +1049,7 @@ export default function PaperSummaryCard({
   sectionId,
   sortable = false,
 }: PaperSummaryCardProps) {
+  const { t } = useTranslation();
   const summary = useQuery(api.summaries.getSummaryByPaper, {
     paperId: match.paperId,
   });
@@ -1176,7 +1171,7 @@ export default function PaperSummaryCard({
   async function handleUnlink() {
     if (
       window.confirm(
-        `Unlink "${match.title}" from this section? Associated excerpts will also be removed.`
+        t("paperCard.unlinkConfirm", { title: match.title })
       )
     ) {
       await removeMatchMutation({ paperId: match.paperId, sectionId });
@@ -1208,22 +1203,22 @@ export default function PaperSummaryCard({
             {match.title}
           </h3>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {formatAuthors(match.authors)}
+            {formatAuthors(match.authors, t("paperCard.unknownAuthors"))}
             {match.year ? ` (${match.year})` : ""}
           </p>
         </div>
 
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <Badge variant="outline" className={`text-xs ${badge.className}`}>
-            {badge.label}
+            {t(badge.tKey)}
           </Badge>
           {match.isManualOverride && (
-            <span className="text-[10px] text-amber-dim">Manual</span>
+            <span className="text-[10px] text-amber-dim">{t("paperCard.manualBadge")}</span>
           )}
           <button
             onClick={handleUnlink}
             className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all p-0.5"
-            title="Unlink from this section"
+            title={t("paperCard.unlinkTooltip")}
           >
             <Unlink className="size-3.5" />
           </button>
@@ -1252,7 +1247,7 @@ export default function PaperSummaryCard({
 
         {summary === null && (
           <p className="text-sm text-muted-foreground italic">
-            Paper has not been processed yet.
+            {t("paperCard.notProcessed")}
           </p>
         )}
 
@@ -1271,13 +1266,13 @@ export default function PaperSummaryCard({
               </div>
             )}
 
-            <CollapsibleSection icon={HelpCircle} label="Research Question" defaultOpen>
+            <CollapsibleSection icon={HelpCircle} label={t("paperCard.researchQuestion")} defaultOpen>
               <p className="text-sm text-foreground/80 leading-relaxed">
                 {summary.researchQuestion}
               </p>
             </CollapsibleSection>
 
-            <CollapsibleSection icon={Lightbulb} label="Key Findings" defaultOpen>
+            <CollapsibleSection icon={Lightbulb} label={t("paperCard.keyFindings")} defaultOpen>
               <ul className="space-y-1">
                 {summary.keyFindings.map((finding, i) => (
                   <li
@@ -1291,13 +1286,13 @@ export default function PaperSummaryCard({
               </ul>
             </CollapsibleSection>
 
-            <CollapsibleSection icon={FlaskConical} label="Methodology">
+            <CollapsibleSection icon={FlaskConical} label={t("paperCard.methodology")}>
               <p className="text-sm text-foreground/70 leading-relaxed">
                 {summary.methodology}
               </p>
             </CollapsibleSection>
 
-            <CollapsibleSection icon={FileText} label="Full Summary">
+            <CollapsibleSection icon={FileText} label={t("paperCard.fullSummary")}>
               <p className="text-sm text-foreground/70 leading-relaxed border-l-2 border-amber/20 pl-3">
                 {summary.rawSummary}
               </p>
@@ -1313,8 +1308,8 @@ export default function PaperSummaryCard({
                   <Quote className="size-3" />
                   <span>
                     {excerptCount > 0
-                      ? `${excerptCount} Supporting Excerpt${excerptCount !== 1 ? "s" : ""}`
-                      : "Supporting Excerpts"}
+                      ? t("paperCard.supportingExcerpts", { count: excerptCount })
+                      : t("paperCard.supportingExcerpts", { count: 0 })}
                   </span>
                   <ChevronDown
                     className={`size-3 ml-auto transition-transform duration-200 ${
@@ -1336,26 +1331,26 @@ export default function PaperSummaryCard({
 
                     {excerptCount === 0 && !showAddExcerpt && (
                       <p className="text-[11px] text-muted-foreground/60 italic">
-                        No excerpts yet.
+                        {t("paperCard.noExcerptsYet")}
                       </p>
                     )}
 
                     {showAddExcerpt ? (
                       <div className="mt-2 space-y-2 p-3 rounded-md bg-muted/30 border border-border/30">
                         <Textarea
-                          placeholder="Paste or type the excerpt text..."
+                          placeholder={t("paperCard.pasteExcerpt")}
                           value={newExcerptText}
                           onChange={(e) => setNewExcerptText(e.target.value)}
                           className="text-sm min-h-[60px]"
                         />
                         <Textarea
-                          placeholder="Why is this relevant? (optional)"
+                          placeholder={t("paperCard.whyRelevant")}
                           value={newRelevanceNote}
                           onChange={(e) => setNewRelevanceNote(e.target.value)}
                           className="text-sm min-h-[40px]"
                         />
                         <Input
-                          placeholder="Page (e.g. 42 or 42–45)"
+                          placeholder={t("paperCard.pageExample")}
                           value={newPageNumber}
                           onChange={(e) => setNewPageNumber(e.target.value)}
                           className="text-sm h-8"
@@ -1371,14 +1366,14 @@ export default function PaperSummaryCard({
                               setNewPageNumber("");
                             }}
                           >
-                            <X className="size-3" /> Cancel
+                            <X className="size-3" /> {t("common.cancel")}
                           </Button>
                           <Button
                             size="xs"
                             onClick={handleAddExcerpt}
                             disabled={!newExcerptText.trim()}
                           >
-                            <Check className="size-3" /> Add
+                            <Check className="size-3" /> {t("paperCard.add")}
                           </Button>
                         </div>
                       </div>
@@ -1387,7 +1382,7 @@ export default function PaperSummaryCard({
                         onClick={() => setShowAddExcerpt(true)}
                         className="flex items-center gap-1 text-[11px] text-amber-dim/60 hover:text-amber transition-colors"
                       >
-                        <Plus className="size-3" /> Add excerpt
+                        <Plus className="size-3" /> {t("paperCard.addExcerpt")}
                       </button>
                     )}
                   </div>
@@ -1406,10 +1401,10 @@ export default function PaperSummaryCard({
             className="flex items-center gap-1.5 text-[11px] font-medium text-amber-dim uppercase tracking-wider hover:text-amber transition-colors w-full"
           >
             <StickyNote className="size-3" />
-            <span>Section Notes</span>
+            <span>{t("paperCard.sectionNotes")}</span>
             {match.userNotes && (
               <span className="text-[9px] text-muted-foreground normal-case tracking-normal ml-1">
-                (has notes)
+                {t("paperCard.hasNotes")}
               </span>
             )}
             <ChevronDown
@@ -1422,7 +1417,7 @@ export default function PaperSummaryCard({
           {notesExpanded && (
             <div className="mt-2 space-y-2">
               <Textarea
-                placeholder="Add notes about this paper's relevance to this section..."
+                placeholder={t("paperCard.addPaperNotes")}
                 value={notesValue}
                 onChange={(e) => {
                   setNotesValue(e.target.value);
@@ -1433,7 +1428,7 @@ export default function PaperSummaryCard({
               {notesDirty && (
                 <div className="flex justify-end">
                   <Button size="xs" onClick={handleSaveNotes}>
-                    Save Notes
+                    {t("paperCard.saveNotes")}
                   </Button>
                 </div>
               )}
@@ -1448,10 +1443,10 @@ export default function PaperSummaryCard({
             className="flex items-center gap-1.5 text-[11px] font-medium text-amber-dim uppercase tracking-wider hover:text-amber transition-colors w-full"
           >
             <FileText className="size-3" />
-            <span>Document Notes</span>
+            <span>{t("paperCard.documentNotes")}</span>
             {paper?.notes && (
               <span className="text-[9px] text-muted-foreground normal-case tracking-normal ml-1">
-                (has notes)
+                {t("paperCard.hasNotes")}
               </span>
             )}
             <ChevronDown
@@ -1464,7 +1459,7 @@ export default function PaperSummaryCard({
           {docNotesExpanded && (
             <div className="mt-2 space-y-2">
               <Textarea
-                placeholder="Add general notes about this paper..."
+                placeholder={t("paperCard.addDocumentNotes")}
                 value={docNotesValue}
                 onChange={(e) => {
                   setDocNotesValue(e.target.value);
@@ -1475,7 +1470,7 @@ export default function PaperSummaryCard({
               {docNotesDirty && (
                 <div className="flex justify-end">
                   <Button size="xs" onClick={handleSaveDocNotes}>
-                    Save Notes
+                    {t("paperCard.saveNotes")}
                   </Button>
                 </div>
               )}
@@ -1484,7 +1479,7 @@ export default function PaperSummaryCard({
         </div>
 
         {/* Quellenangabe — unified paper metadata + bibliography source editing */}
-        <CollapsibleSection icon={BookOpen} label="Quellenangabe">
+        <CollapsibleSection icon={BookOpen} label={t("paperSummaryCard.sourceDetails")}>
           <PaperMetadataForm paperId={match.paperId} />
           <div className="mt-3 pt-3 border-t border-border/10">
             <SourceEditForm paperId={match.paperId} />

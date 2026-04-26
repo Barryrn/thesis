@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { useLanguage } from "@/lib/LanguageContext";
 import { useProvider } from "@/lib/ProviderContext";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
@@ -30,6 +31,8 @@ type LogEntry = {
 };
 
 export default function ZoteroImport() {
+  const { t } = useTranslation();
+
   // --- State ---
   const [collections, setCollections] = useState<ZoteroCollection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(
@@ -159,10 +162,10 @@ export default function ZoteroImport() {
     setDeletingKey(zoteroItemKey);
     try {
       await deletePaper({ paperId });
-      toast.success("Aus Projekt entfernt");
+      toast.success(t("zoteroImport.removedFromProject"));
       setDeleteMenuKey(null);
     } catch (err) {
-      toast.error(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : err}`);
+      toast.error(t("toast.deleteFailedMessage", { message: err instanceof Error ? err.message : String(err) }));
     } finally {
       setDeletingKey(null);
     }
@@ -182,21 +185,21 @@ export default function ZoteroImport() {
 
       if (res.status === 403) {
         const err = await res.json();
-        toast.error(err.detail ?? "Zotero API-Schlüssel hat keine Löschberechtigung");
+        toast.error(err.detail ?? t("toast.zoteroNoDeletePermission"));
         return;
       }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-        toast.error(`Zotero-Löschung fehlgeschlagen: ${err.detail}`);
+        toast.error(t("toast.zoteroDeleteFailed", { message: err.detail }));
         return;
       }
 
       await deletePaper({ paperId });
-      toast.success("Aus Zotero und Projekt gelöscht");
+      toast.success(t("toast.deletedFromZoteroAndProject"));
       setDeleteMenuKey(null);
     } catch (err) {
-      toast.error(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : err}`);
+      toast.error(t("toast.deleteFailedMessage", { message: err instanceof Error ? err.message : String(err) }));
     } finally {
       setDeletingKey(null);
     }
@@ -411,7 +414,7 @@ export default function ZoteroImport() {
                           )}
                           {isImported && (
                             <Badge className="text-[10px] bg-green-500/20 text-green-600 shrink-0">
-                              Importiert
+                              {t("zoteroImport.imported")}
                             </Badge>
                           )}
                           {!isImported && isDuplicate && (
@@ -436,7 +439,7 @@ export default function ZoteroImport() {
                             setDeleteMenuKey(showMenu ? null : item.key);
                           }}
                           className="text-muted-foreground hover:text-destructive p-1 rounded-md hover:bg-muted/20 transition-colors"
-                          title="Löschen"
+                          title={t("common.delete")}
                         >
                           {isDeleting ? (
                             <Loader2 className="size-3.5 animate-spin" />
@@ -454,7 +457,7 @@ export default function ZoteroImport() {
                               }}
                               className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 text-foreground"
                             >
-                              Aus Projekt entfernen
+                              {t("zoteroImport.removeFromProject")}
                             </button>
                             <button
                               onClick={(e) => {
@@ -463,7 +466,7 @@ export default function ZoteroImport() {
                               }}
                               className="w-full text-left px-3 py-1.5 text-xs hover:bg-destructive/10 text-red-500"
                             >
-                              Aus Zotero löschen
+                              {t("zoteroImport.deleteFromZotero")}
                             </button>
                           </div>
                         )}

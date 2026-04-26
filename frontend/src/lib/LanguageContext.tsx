@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import i18n from "./i18n";
 
 export type Language = "en" | "de";
 
@@ -16,6 +17,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored === "de" ? "de" : "en";
   });
+
+  /// Keep react-i18next in sync whenever the language changes.
+  useEffect(() => {
+    i18n.changeLanguage(language);
+  }, [language]);
 
   function setLanguage(lang: Language) {
     setLanguageState(lang);
