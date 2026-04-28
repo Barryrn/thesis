@@ -3,7 +3,7 @@ import json
 from ai_client import chat_completion
 from pipeline_logger import get_logger
 
-MAX_TEXT_CHARS = 30_000
+MAX_TEXT_CHARS = 60_000
 
 LANGUAGE_NAMES = {"en": "English", "de": "German (Deutsch)"}
 
@@ -18,7 +18,7 @@ def _build_score_prompt(language: str = "en") -> str:
     return f"""You are mapping a research paper to thesis outline sections.
 For each section:
 1. Score from 0.0 to 1.0 based on relevance to the paper. Be strict: only score above 0.5 if the paper clearly belongs in that section.
-2. For sections scored >= 0.4, extract 1-3 verbatim excerpts (exact quotes) from the paper text that support the assignment. Each excerpt should be 1-3 sentences. Also provide a brief relevance note explaining why this excerpt supports the section.{relevance_note_lang}
+2. For sections scored >= 0.4, extract as many verbatim excerpts (exact quotes) from the paper text as genuinely support the assignment — include every excerpt that adds distinct supporting evidence, and stop only when further excerpts would be redundant. Each excerpt should be 1-3 sentences. Also provide a brief relevance note explaining why this excerpt supports the section.{relevance_note_lang}
 
 Some sections may include guidance notes (shown after the title in parentheses). These notes describe what content belongs in that section or which aspects are particularly important. Use these notes to improve your scoring accuracy — they represent the author's intent for what each section should contain.
 
@@ -45,7 +45,7 @@ Rules:
 - The sectionId MUST be the exact id string provided in the section list (e.g. "j5799ceg..."). Do NOT use the order number.
 - Sections with score < 0.4 should have an empty excerpts array.
 - Excerpts MUST be exact quotes from the paper text provided. Do not paraphrase.
-- Maximum 3 excerpts per section.
+- There is no fixed maximum on excerpts per section — use your judgement and include every excerpt that adds distinct supporting evidence, but avoid redundant or near-duplicate quotes.
 - Each excerpt text should be 1-3 complete sentences.
 - Do NOT include "--- PAGE N ---" markers in the excerpt text itself."""
 

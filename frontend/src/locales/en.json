@@ -517,7 +517,9 @@
     "unknownAuthors": "Unknown authors",
     "unassigned": "Unassigned",
     "processing": "Processing...",
-    "notProcessed": "Not processed"
+    "notProcessed": "Not processed",
+    "stopProcessing": "Stop processing",
+    "stopProcessingConfirm": "Stop processing \"{{title}}\"? The file and any partial results will be deleted."
   },
 
   "sectionWriteEditor": {

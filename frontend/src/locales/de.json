@@ -517,7 +517,9 @@
     "unknownAuthors": "Unbekannte Autoren",
     "unassigned": "Nicht zugeordnet",
     "processing": "Verarbeitung...",
-    "notProcessed": "Nicht verarbeitet"
+    "notProcessed": "Nicht verarbeitet",
+    "stopProcessing": "Verarbeitung abbrechen",
+    "stopProcessingConfirm": "Verarbeitung von „{{title}}\" abbrechen? Die Datei und unvollständige Ergebnisse werden gelöscht."
   },
 
   "sectionWriteEditor": {

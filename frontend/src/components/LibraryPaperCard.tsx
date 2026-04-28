@@ -9,7 +9,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, GripVertical, Trash2, MoreHorizontal, Check } from "lucide-react";
+import { ChevronDown, GripVertical, Trash2, MoreHorizontal, Check, Square } from "lucide-react";
 import { PROCESSING_STEP_LABELS } from "@/lib/types";
 import type { Paper, DragData, PaperGroup, GroupId } from "@/lib/types";
 
@@ -295,9 +295,27 @@ export default function LibraryPaperCard({
           </div>
 
           {paper.status === "processing" && paper.processingStep && (
-            <p className="text-[10px] text-dusty-blue mt-0.5 animate-pulse">
-              {PROCESSING_STEP_LABELS[paper.processingStep] ?? t("libraryCard.processing")}
-            </p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-[10px] text-dusty-blue animate-pulse">
+                {PROCESSING_STEP_LABELS[paper.processingStep] ?? t("libraryCard.processing")}
+              </p>
+              {/* Stop button — hard-deletes the paper and any partial Convex state.
+                  Python detects the deletion at its next stage boundary and exits. */}
+              <button
+                type="button"
+                aria-label={t("libraryCard.stopProcessing")}
+                title={t("libraryCard.stopProcessing")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(t("libraryCard.stopProcessingConfirm", { title: paper.title }))) {
+                    deletePaper({ paperId: paper._id });
+                  }
+                }}
+                className="text-muted-foreground hover:text-destructive transition-colors"
+              >
+                <Square className="w-3 h-3" />
+              </button>
+            </div>
           )}
         </div>
       </div>
