@@ -460,6 +460,34 @@
     "startWriting": "Beginne hier deinen Thesis-Text zu schreiben..."
   },
 
+  "generateSection": {
+    "title": "Abschnitt generieren",
+    "description": "Entwirft Prosa aus den Outline-Notizen, zugeordneten Auszügen und Paper-Zusammenfassungen. Zitate werden automatisch eingefügt und können nach dem Einfügen bearbeitet werden.",
+    "noMatchesTitle": "Keine zugeordneten Paper",
+    "noMatchesBody": "Diesem Abschnitt sind noch keine Paper zugeordnet. Ziehe im Outline ein Paper auf den Abschnitt (oder ergänze manuelle Inhalte), bevor du Prosa generierst — der Writer zitiert nur zugeordnete Quellen.",
+    "guidanceLabel": "Hinweise für die KI (optional)",
+    "guidancePlaceholder": "z. B. konzentriere dich auf widersprüchliche empirische Befunde; halte den historischen Hintergrund kurz; betone die Perspektive der Autorin/des Autors.",
+    "checking": "Kontext wird geprüft…",
+    "generate": "Generieren",
+    "clarifyIntro": "Ein paar Fragen vor dem Entwurf — beantworte, was du kannst, und überspringe den Rest.",
+    "skipAndWrite": "Trotzdem schreiben",
+    "continue": "Weiter",
+    "drafting": "Entwerfe…",
+    "draft": "Entwurf",
+    "cancel": "Abbrechen",
+    "waiting": "Warte auf Tokens…",
+    "citationNotes": "Hinweise zu Zitaten",
+    "append": "Anhängen",
+    "replace": "Ersetzen",
+    "insert": "Einfügen",
+    "failed": "Generierung fehlgeschlagen",
+    "retry": "Erneut versuchen",
+    "unknownError": "Etwas ist schiefgelaufen.",
+    "toolbarButton": "Generieren",
+    "toolbarTitleEnabled": "Diesen Abschnitt mit KI auf Basis zugeordneter Auszüge entwerfen",
+    "toolbarTitleDisabled": "Ordne diesem Abschnitt zuerst Paper zu"
+  },
+
   "thesisPreviewFull": {
     "title": "Thesis-Vorschau",
     "aiPromptSettings": "KI-Prompt-Einstellungen",

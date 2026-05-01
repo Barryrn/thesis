@@ -15,6 +15,137 @@ export const getSectionContent = query({
   },
 });
 
+/// Bundles everything the section-writer needs to draft prose for a section
+/// in a single round-trip. Intended for the Python /clarify and
+/// /generate-section endpoints — they should not have to chain multiple
+/// queries to assemble outline + matches + summaries + sources + thesis lang.
+export const getGenerationContext = query({
+  args: { sectionId: v.id("outlineSections") },
+  handler: async (ctx, args) => {
+    const section = await ctx.db.get(args.sectionId);
+    if (!section) {
+      throw new Error(`Section not found: ${args.sectionId}`);
+    }
+
+    // Walk the parent chain (depth -> root) so the AI can see hierarchical context.
+    const parents: { orderNumber: string; title: string }[] = [];
+    let cursorParentId = section.parentId;
+    while (cursorParentId) {
+      const parent = await ctx.db.get(cursorParentId);
+      if (!parent) break;
+      parents.unshift({ orderNumber: parent.orderNumber, title: parent.title });
+      cursorParentId = parent.parentId;
+    }
+
+    // Sibling sections share the same parent (or are top-level when no parent).
+    // Excluding self prevents the AI from being primed by the very section it's writing.
+    const sameVersion = await ctx.db
+      .query("outlineSections")
+      .withIndex("by_version", (q) =>
+        q.eq("outlineVersion", section.outlineVersion)
+      )
+      .collect();
+    const siblings = sameVersion
+      .filter(
+        (s) =>
+          s._id !== section._id &&
+          (s.parentId ?? null) === (section.parentId ?? null)
+      )
+      .sort((a, b) => a.orderNumber.localeCompare(b.orderNumber))
+      .map((s) => ({ orderNumber: s.orderNumber, title: s.title }));
+
+    // Existing prose body (if any) — needed for language detection and so the
+    // /generate-section endpoint can confirm whether Replace/Append applies.
+    const content = await ctx.db
+      .query("sectionContent")
+      .withIndex("by_section", (q) => q.eq("sectionId", section._id))
+      .first();
+
+    // Mapped papers + their summaries, source Kürzel, and verbatim excerpts.
+    // The Kürzel and summary together let the AI form indirect citations;
+    // excerpts (with page numbers) ground direct citations.
+    const matchRows = await ctx.db
+      .query("paperSectionMatches")
+      .withIndex("by_section", (q) => q.eq("sectionId", section._id))
+      .collect();
+
+    const matches = [];
+    for (const match of matchRows) {
+      const paper = await ctx.db.get(match.paperId);
+      if (!paper) continue;
+
+      const [summary, sourceRows, excerptRows] = await Promise.all([
+        ctx.db
+          .query("summaries")
+          .withIndex("by_paper", (q) => q.eq("paperId", match.paperId))
+          .first(),
+        ctx.db
+          .query("sources")
+          .withIndex("by_paper", (q) => q.eq("paperId", match.paperId))
+          .collect(),
+        ctx.db
+          .query("matchExcerpts")
+          .withIndex("by_match", (q) => q.eq("matchId", match._id))
+          .collect(),
+      ]);
+
+      const source = sourceRows[0];
+      const excerpts = excerptRows
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+        .map((e) => ({
+          text: e.excerptText,
+          pageNumber: e.pageNumber ?? null,
+          relevanceNote: e.relevanceNote,
+        }));
+
+      matches.push({
+        paperId: match.paperId,
+        title: paper.title,
+        authors: paper.authors,
+        year: paper.year ?? null,
+        kuerzel: source?.kuerzel ?? null,
+        summary: summary
+          ? {
+              researchQuestion: summary.researchQuestion,
+              methodology: summary.methodology,
+              keyFindings: summary.keyFindings,
+              keywords: summary.keywords,
+              rawSummary: summary.rawSummary,
+              language: summary.language ?? null,
+            }
+          : null,
+        excerpts,
+      });
+    }
+
+    // The thesis language is not a single field on thesisMetadata. We surface
+    // a best-effort default ("de" — the project's required German title is
+    // mandatory while English is optional) so Python can fall back to it when
+    // the section body is too short to language-detect from. Per-summary
+    // languages are also returned via matches[].summary.language so the
+    // writer can prefer the dominant language of the cited literature.
+    const metaDocs = await ctx.db.query("thesisMetadata").collect();
+    const meta = metaDocs[0];
+    const thesisLanguage =
+      meta && meta.titleEN && !meta.titleDE ? "en" : "de";
+
+    return {
+      section: {
+        _id: section._id,
+        orderNumber: section.orderNumber,
+        title: section.title,
+        depth: section.depth,
+        notes: section.notes ?? null,
+      },
+      parents,
+      siblings,
+      body: content?.body ?? null,
+      matches,
+      thesisLanguage,
+    };
+  },
+});
+
 /// Upserts the authored body text and cited paper IDs for a section.
 /// Enforces a one-to-one relationship: patches existing doc or inserts new.
 export const saveSectionContent = mutation({

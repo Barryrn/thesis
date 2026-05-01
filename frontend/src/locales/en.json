@@ -460,6 +460,34 @@
     "startWriting": "Start writing your thesis text here..."
   },
 
+  "generateSection": {
+    "title": "Generate section",
+    "description": "Drafts prose from outline notes, mapped excerpts, and paper summaries. Citations are inserted automatically and may be edited after insert.",
+    "noMatchesTitle": "No mapped papers",
+    "noMatchesBody": "This section has no papers mapped to it yet. Drag a paper onto the section in the outline (or add manual content) before generating prose — the writer will only cite mapped sources.",
+    "guidanceLabel": "Guidance for the AI (optional)",
+    "guidancePlaceholder": "e.g. focus on conflicting empirical findings; keep historical background brief; emphasise the user's perspective.",
+    "checking": "Checking context…",
+    "generate": "Generate",
+    "clarifyIntro": "A few questions before drafting — answer what you can and skip what you can't.",
+    "skipAndWrite": "Skip and write anyway",
+    "continue": "Continue",
+    "drafting": "Drafting…",
+    "draft": "Draft",
+    "cancel": "Cancel",
+    "waiting": "Waiting for tokens…",
+    "citationNotes": "Citation review notes",
+    "append": "Append",
+    "replace": "Replace",
+    "insert": "Insert",
+    "failed": "Generation failed",
+    "retry": "Retry",
+    "unknownError": "Something went wrong.",
+    "toolbarButton": "Generate",
+    "toolbarTitleEnabled": "Draft this section with AI using mapped excerpts",
+    "toolbarTitleDisabled": "Map papers to this section first"
+  },
+
   "thesisPreviewFull": {
     "title": "Thesis Preview",
     "aiPromptSettings": "AI prompt settings",

@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2 } from "lucide-react";
+import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2 } from "lucide-react";
 import CitationPicker from "./CitationPicker";
 import SectionPromptEditor from "./SectionPromptEditor";
 import FormulaPreviewPanel from "./FormulaPreviewPanel";
 import FigurePanel from "./FigurePanel";
+import GenerateSectionPopover from "./GenerateSectionPopover";
 import {
   extractCitationIds,
   insertCitationMarker,
@@ -61,6 +62,8 @@ export default function SectionWriteEditor({
   const { baselines } = useBaselinePrompts();
   const updatePromptOverrides = useMutation(api.sectionContent.updateAiPromptOverrides);
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
+  /// Open state for the AI section-writer popover (toolbar Generate button).
+  const [generatePopoverOpen, setGeneratePopoverOpen] = useState(false);
 
   // ── Local state ───────────────────────────────────────────────────────
   const [body, setBody] = useState("");
@@ -495,6 +498,22 @@ export default function SectionWriteEditor({
     setSelection(null);
   }, [discardOptimize]);
 
+  /// Adopts a body produced by the section-writer popover.
+  ///
+  /// The popover already decided whether the user picked Replace or
+  /// Append (it has the existing body) and hands us the final string.
+  /// We just splice it into local state, schedule the autosave, and
+  /// force the contentEditable to re-render so footnote markers show
+  /// up immediately.
+  const handleGeneratedInsert = useCallback(
+    (newBody: string) => {
+      setBody(newBody);
+      scheduleSave(newBody);
+      rerenderEditor(newBody, newBody.length);
+    },
+    [scheduleSave, rerenderEditor]
+  );
+
   /// Inserts a display formula template ($$  $$) at the current cursor position.
   const handleInsertFormula = useCallback(() => {
     const editor = editorRef.current;
@@ -547,6 +566,25 @@ export default function SectionWriteEditor({
           >
             <Sigma className="size-3" />
             {t("optimize.formula")}
+          </button>
+          {/*
+            "Generate section" — opens the AI section-writer popover.
+            Disabled when the section has no mapped papers, since the
+            writer is forbidden from citing papers outside the match
+            list and uncited prose isn't useful for a thesis.
+          */}
+          <button
+            onClick={() => setGeneratePopoverOpen(true)}
+            disabled={matches.length === 0}
+            className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={
+              matches.length === 0
+                ? t("generateSection.toolbarTitleDisabled")
+                : t("generateSection.toolbarTitleEnabled")
+            }
+          >
+            <Wand2 className="size-3" />
+            {t("generateSection.toolbarButton")}
           </button>
         </div>
         <div className="flex items-center gap-3">
@@ -733,6 +771,17 @@ export default function SectionWriteEditor({
             aiPromptOverrides: overrides,
           });
         }}
+      />
+
+      {/* AI section-writer popover (drafts prose with citations). */}
+      <GenerateSectionPopover
+        open={generatePopoverOpen}
+        onOpenChange={setGeneratePopoverOpen}
+        sectionId={sectionId}
+        provider={provider}
+        existingBody={body}
+        hasMatches={matches.length > 0}
+        onInsert={handleGeneratedInsert}
       />
     </div>
   );

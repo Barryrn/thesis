@@ -141,6 +141,19 @@ def set_manual_content_summarized_at(paper_id: str):
     })
 
 
+def get_generation_context(section_id: str) -> dict:
+    """Fetch the section-writer payload (outline + matches + summaries + lang).
+
+    Wraps the ``sectionContent:getGenerationContext`` query so the
+    /clarify and /generate-section endpoints can pull all the context
+    they need in a single round-trip rather than chaining queries.
+    """
+    result = _query(
+        "sectionContent:getGenerationContext", {"sectionId": section_id}
+    )
+    return result.get("value", result) if isinstance(result, dict) else result
+
+
 def get_summary_language(paper_id: str) -> str | None:
     """Return the stored language code for this paper's summary, or None.
 

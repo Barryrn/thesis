@@ -13,12 +13,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+import ai_client
 import convex_client
 import docx_builder
 import extractor
 import identifier
 import mapper
 import optimizer
+import section_writer
 import summarizer
 import zotero_client
 from zotero_client import ZoteroConfigError, ZoteroAuthError
@@ -517,6 +519,188 @@ async def optimize_text(req: OptimizeRequest):
             extra={"step": "optimize", "status": "failed"},
         )
         return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+class ClarifyRequest(BaseModel):
+    """Request body for the section-writer clarify step."""
+    sectionId: str
+    guidance: str | None = None
+    provider: str = "anthropic"
+
+
+class AnswerPair(BaseModel):
+    """One clarify question + the user's free-form answer."""
+    question: str
+    answer: str
+
+
+class GenerateSectionRequest(BaseModel):
+    """Request body for the streaming /generate-section endpoint."""
+    sectionId: str
+    guidance: str | None = None
+    answers: list[AnswerPair] = []
+    provider: str = "anthropic"
+
+
+@app.post("/clarify")
+async def clarify_section(req: ClarifyRequest):
+    """Decide whether the AI needs the user to answer questions first.
+
+    Cheap synchronous JSON call. Returns
+    ``{"needs_clarification": false}`` when the outline notes, guidance,
+    and mapped excerpts are sufficient — otherwise returns up to 4
+    free-form questions for the user to answer before drafting begins.
+    """
+    logger = get_logger()
+    logger.info(
+        f"Clarify started: sectionId={req.sectionId}, provider={req.provider}",
+        extra={"step": "section_clarify", "status": "started"},
+    )
+
+    try:
+        ctx = await run_in_threadpool(
+            convex_client.get_generation_context, req.sectionId
+        )
+        if not ctx:
+            return JSONResponse(status_code=404, content={"detail": "Section not found"})
+
+        # Block early when there is nothing to ground citations in. The
+        # frontend already gates the button, but we double-check here so
+        # a stale UI can't slip through.
+        if not (ctx.get("matches") or []):
+            return {
+                "needs_clarification": False,
+                "questions": [],
+                "blocked": "no_matches",
+            }
+
+        payload = section_writer.build_context_payload(ctx)
+        system, user = section_writer.build_clarify_messages(payload, req.guidance)
+
+        raw = await run_in_threadpool(
+            ai_client.chat_completion,
+            req.provider,
+            "writer",
+            system,
+            user,
+            512,  # questions are short; capping cost
+        )
+        parsed = section_writer.parse_clarify_response(raw)
+        logger.info(
+            f"Clarify completed: needs={parsed['needs_clarification']}, "
+            f"questions={len(parsed.get('questions', []))}",
+            extra={"step": "section_clarify", "status": "completed"},
+        )
+        return parsed
+    except Exception as e:
+        logger.error(
+            f"Clarify failed: {type(e).__name__}: {e}",
+            extra={"step": "section_clarify", "status": "failed"},
+        )
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@app.post("/generate-section")
+async def generate_section(req: GenerateSectionRequest):
+    """Stream a drafted thesis section as Server-Sent Events.
+
+    The body of the response is a sequence of ``data: {json}\\n\\n``
+    frames carrying ``token`` deltas, then a final ``done`` event with
+    the full text and any citation-validator warnings. Errors arrive as
+    ``error`` events. The frontend reads the stream via fetch +
+    ReadableStream and can abort at any time with AbortController.
+    """
+    logger = get_logger()
+    logger.info(
+        f"Generate-section started: sectionId={req.sectionId}, provider={req.provider}",
+        extra={"step": "section_generate", "status": "started"},
+    )
+
+    def emit(event_type: str, payload: dict) -> str:
+        """Format a single SSE frame matching the /zotero/import convention."""
+        return f"data: {json.dumps({'type': event_type, **payload})}\n\n"
+
+    async def event_generator():
+        try:
+            ctx = await run_in_threadpool(
+                convex_client.get_generation_context, req.sectionId
+            )
+            if not ctx:
+                yield emit("error", {"message": "Section not found"})
+                return
+            if not (ctx.get("matches") or []):
+                # Frontend should not let us get here, but fail safe rather
+                # than producing uncited prose.
+                yield emit("error", {"message": "No mapped papers for this section."})
+                return
+
+            payload = section_writer.build_context_payload(ctx)
+            system, user = section_writer.build_generation_messages(
+                payload,
+                req.guidance,
+                [a.model_dump() for a in req.answers],
+            )
+
+            allowed_ids = [m["paperId"] for m in payload.get("matches") or []]
+            allowed_pages = section_writer.collect_allowed_pages_by_paper(payload)
+
+            # Prime the stream so any reverse-proxy buffering flushes
+            # before the first model token arrives.
+            yield emit("ready", {})
+
+            full_chunks: list[str] = []
+            stream = ai_client.chat_completion_stream(
+                provider=req.provider,
+                module="writer",
+                system=system,
+                user_message=user,
+                max_tokens=4096,
+            )
+
+            # The OpenAI/Anthropic SDKs are synchronous — running them on
+            # the asyncio event loop directly would block other handlers.
+            # ``iterate_in_threadpool`` would be ideal but is unavailable
+            # for arbitrary generators, so we drive the iterator from a
+            # threadpool one chunk at a time using a sentinel.
+            sentinel = object()
+            iterator = iter(stream)
+
+            def _next_chunk():
+                """Fetch the next delta from the SDK iterator (blocking)."""
+                try:
+                    return next(iterator)
+                except StopIteration:
+                    return sentinel
+
+            while True:
+                chunk = await run_in_threadpool(_next_chunk)
+                if chunk is sentinel:
+                    break
+                full_chunks.append(chunk)
+                yield emit("token", {"delta": chunk})
+
+            full_text = "".join(full_chunks)
+            cleaned, warnings = section_writer.validate_citation_markers(
+                full_text, allowed_ids, allowed_pages
+            )
+            yield emit("done", {"fullText": cleaned, "warnings": warnings})
+            logger.info(
+                f"Generate-section completed: chars={len(cleaned)}, "
+                f"warnings={len(warnings)}",
+                extra={"step": "section_generate", "status": "completed"},
+            )
+        except Exception as e:
+            logger.error(
+                f"Generate-section failed: {type(e).__name__}: {e}",
+                extra={"step": "section_generate", "status": "failed"},
+            )
+            yield emit("error", {"message": str(e)})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/export")
