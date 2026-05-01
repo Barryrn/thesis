@@ -1167,7 +1167,7 @@ export default function SectionWriteEditor({
         <CitationRecommendSheet
           sectionId={sectionId}
           provider={provider}
-          fallbackLanguage={language}
+          language={language}
           onClose={() => setRecommendSheetOpen(false)}
         />
       )}

@@ -67,11 +67,6 @@ function SectionContent({
   const [sortBy, setSortBy] = useState<PaperSort>("relevance");
   const [activeTab, setActiveTab] = useState<CenterTab>("papers");
 
-  // Reset tab when switching sections
-  useEffect(() => {
-    setActiveTab("papers");
-  }, [activeSection.sectionId]);
-
   const matches =
     useQuery(api.matches.getMatchesBySection, {
       sectionId: activeSection.sectionId,

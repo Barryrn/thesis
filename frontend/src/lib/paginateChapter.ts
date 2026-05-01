@@ -8,6 +8,7 @@
 
 const ATOMIC_CLASSES = ["thesis-figure", "formula-display", "hka-footnotes"];
 const ATOMIC_TAGS = new Set(["FIGURE", "TABLE", "LI"]);
+const HEADING_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
 
 function isAtomic(el: Element): boolean {
   if (ATOMIC_TAGS.has(el.tagName)) return true;
@@ -77,6 +78,35 @@ function groupChildNodes(parent: Node, parentTop: number): NodeBlock[] {
   }
   flushRun();
   return blocks;
+}
+
+/// True if a block is a single heading element (H1–H6). Headings must stay
+/// on the same page as their first following block — see keep-with-next
+/// logic in `packSection` and the top-level loop.
+function isHeading(block: NodeBlock): boolean {
+  if (!block.isElement) return false;
+  const el = block.nodes[0] as Element;
+  return HEADING_TAGS.has(el.tagName);
+}
+
+/// True for blocks that don't represent real content — bare `<br>` elements
+/// used as paragraph spacers. When deciding whether a heading + "next block"
+/// fit together, we must skip these so the lookahead lands on actual prose;
+/// otherwise a heading followed by `<br>` trivially passes the keep-with-next
+/// check and orphans on the previous page.
+function isFiller(block: NodeBlock): boolean {
+  if (!block.isElement) return false;
+  const el = block.nodes[0] as Element;
+  return el.tagName === "BR";
+}
+
+/// Find the index of the first non-filler block at or after `from`. Returns
+/// -1 when no such block exists.
+function nextSubstantive(blocks: NodeBlock[], from: number): number {
+  for (let j = from; j < blocks.length; j++) {
+    if (!isFiller(blocks[j])) return j;
+  }
+  return -1;
 }
 
 /// Compute the height of an inner-block range [startIdx..endIdx] inclusive,
@@ -160,8 +190,29 @@ export function paginate(
       const remaining = maxHeightPx - usedHeight;
 
       if (heightSoFar <= remaining) {
-        cursor++;
-        continue;
+        // Keep-with-next: a heading must not be the last visible block on
+        // a page. We look ahead for the next *substantive* block (skipping
+        // `<br>` spacers, which would trivially fit and defeat the check)
+        // and require the heading + that block to fit together. If they
+        // don't fit, fall through to overflow handling so the heading is
+        // pushed to the next page along with its first body block. Skipped
+        // when the page is otherwise empty (degenerate: a single pair too
+        // tall for a full page — let it flow as best it can).
+        const nextIdx = isHeading(innerBlocks[cursor])
+          ? nextSubstantive(innerBlocks, cursor + 1)
+          : -1;
+        if (nextIdx !== -1 && !currentEmpty) {
+          const pairHeight = rangeHeight(innerBlocks, sliceStart, nextIdx);
+          if (pairHeight > remaining) {
+            // Fall through to overflow handling below — do NOT advance cursor.
+          } else {
+            cursor++;
+            continue;
+          }
+        } else {
+          cursor++;
+          continue;
+        }
       }
 
       // Block at cursor pushed slice over budget. Emit slice up to but
@@ -195,11 +246,25 @@ export function paginate(
     }
   };
 
-  for (const block of topBlocks) {
+  for (let bi = 0; bi < topBlocks.length; bi++) {
+    const block = topBlocks[bi];
     const blockHeight = block.bottom - block.top;
     const remaining = maxHeightPx - usedHeight;
 
     if (blockHeight <= remaining) {
+      // Keep-with-next: never leave a heading orphaned at the bottom of a
+      // page. Look ahead past `<br>` fillers to the next substantive block
+      // and force a page break if the pair won't fit.
+      if (isHeading(block) && !currentEmpty) {
+        const nextIdx = nextSubstantive(topBlocks, bi + 1);
+        if (nextIdx !== -1) {
+          const next = topBlocks[nextIdx];
+          const pairHeight = next.bottom - block.top;
+          if (pairHeight > remaining) {
+            openNewPage();
+          }
+        }
+      }
       placeWhole(block);
       continue;
     }

@@ -28,8 +28,10 @@ interface CitationRecommendSheetProps {
   sectionId: SectionId;
   /// Provider override forwarded to the Python recommender.
   provider: string;
-  /// Used by the recommender only when body+notes are too short to detect language.
-  fallbackLanguage: Language;
+  /// Reasoning language for the recommender. The current UI locale is passed
+  /// here so the explanation matches the language the user is reading the app
+  /// in, regardless of how much draft prose the section already has.
+  language: Language;
   onClose: () => void;
 }
 
@@ -48,7 +50,7 @@ type RunState =
 export default function CitationRecommendSheet({
   sectionId,
   provider,
-  fallbackLanguage,
+  language,
   onClose,
 }: CitationRecommendSheetProps) {
   const { t } = useTranslation();
@@ -106,7 +108,7 @@ export default function CitationRecommendSheet({
         sectionId,
         scope: buildScope(),
         provider,
-        fallbackLanguage,
+        language,
       });
       setRun({
         status: "done",

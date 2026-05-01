@@ -98,7 +98,11 @@ export const recommendPapersForSection = action({
     ),
     /// Provider override; defaults to anthropic to match the rest of the app.
     provider: v.optional(v.string()),
-    /// Fallback language hint. Used only if body+notes are too short to detect.
+    /// Explicit reasoning language. When set, the UI's choice wins and we skip
+    /// auto-detection — the user's selected app locale is the source of truth.
+    language: v.optional(v.union(v.literal("en"), v.literal("de"))),
+    /// Fallback language hint. Used only if `language` is omitted *and* the
+    /// body is too short for the heuristic to decide. Kept for back-compat.
     fallbackLanguage: v.optional(v.union(v.literal("en"), v.literal("de"))),
   },
   handler: async (ctx, args) => {
@@ -191,8 +195,10 @@ export const recommendPapersForSection = action({
       });
     }
 
-    // Detect language from the body so reasoning text matches the user's prose.
-    const language = detectLanguage(body, fallback);
+    // If the caller passed an explicit `language` (the UI does — it knows the
+    // app locale), trust it. Otherwise fall back to body-based detection so
+    // older callers still get prose-matching reasoning.
+    const language = args.language ?? detectLanguage(body, fallback);
     const lowContextLocal =
       (body.trim().length + notes.trim().length) < LOW_CONTEXT_CHAR_THRESHOLD;
 
