@@ -19,6 +19,7 @@ import {
   Loader2,
   AlertCircle,
   ListChecks,
+  Square,
 } from "lucide-react";
 import { GROUP_COLORS } from "@/lib/types";
 import type { PaperGroup, GroupId } from "@/lib/types";
@@ -264,6 +265,43 @@ function GroupRow({
   // both contexts without clobbering.
   const [reviewOpen, setReviewOpen] = useState(false);
   const [draftName, setDraftName] = useState(group.name);
+  // Holds the current run's AbortController so the Stop button can cancel
+  // mid-flight. Nulled out after the run finishes (either way). A ref —
+  // not state — because aborting doesn't need to trigger a rerender; the
+  // server-side suggestionRunStatus already drives the spinner.
+  const runAbortRef = useRef<AbortController | null>(null);
+  // Set when the user clicks Stop; consumed by the post-run toast effect
+  // to suppress the "AI suggestions ready" message. Reset at the start
+  // of each new run.
+  const userStoppedRef = useRef(false);
+
+  // Starts a matcher run with abort tracking. Replaces any in-flight run
+  // for this row — there's only ever one at a time per group.
+  async function startRun() {
+    runAbortRef.current?.abort();
+    userStoppedRef.current = false;
+    const ctrl = new AbortController();
+    runAbortRef.current = ctrl;
+    try {
+      await runGroupMatcher(convex, group._id, { signal: ctrl.signal });
+    } finally {
+      // Only clear if we're still the active controller — a newer run
+      // would have replaced the ref already.
+      if (runAbortRef.current === ctrl) runAbortRef.current = null;
+    }
+  }
+
+  // Stop the current run. Idempotent if no run is active. The matcher's
+  // `finally` block clears the running status; we surface a confirmation
+  // toast immediately so the user knows the click registered (the status
+  // patch arrives a tick later via the in-flight mutation).
+  function stopRun() {
+    if (!runAbortRef.current) return;
+    userStoppedRef.current = true;
+    runAbortRef.current.abort();
+    toast.message(t("groups.suggestions.stopped", { name: group.name }));
+  }
+
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -302,6 +340,10 @@ function GroupRow({
     if (prev === "running" && curr !== "running") {
       if (curr === "failed") {
         toast.error(group.suggestionRunError ?? t("groups.suggestions.failed"));
+      } else if (userStoppedRef.current) {
+        // User clicked Stop — they already got a "Stopped" toast at click
+        // time. Don't double-toast with "ready" on top of it.
+        userStoppedRef.current = false;
       } else {
         // Idle (success) — confirm completion. The header badge already
         // shows the new pending count, so we only need a light confirmation.
@@ -368,19 +410,24 @@ function GroupRow({
       )}
 
       {/* AI run state — shown only while a backfill / rerun is in flight,
-          or briefly when the last run failed. Progress shows N/M papers
-          scored so the user knows the matcher is alive. */}
+          or briefly when the last run failed. The pill doubles as a Stop
+          button: hover to swap the spinner for a Square (stop) icon, click
+          to abort the run mid-flight. */}
       {group.suggestionRunStatus === "running" && (
-        <span
-          className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber/15 text-amber shrink-0 flex items-center gap-1"
-          title={t("groups.suggestions.running", {
-            done: group.suggestionRunProgress ?? 0,
-            total: group.suggestionRunTotal ?? 0,
-          })}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            stopRun();
+          }}
+          title={t("groups.suggestions.stop")}
+          className="group/runpill text-[10px] px-1.5 py-0.5 rounded-full bg-amber/15 text-amber hover:bg-amber/25 hover:text-amber shrink-0 flex items-center gap-1 transition-colors"
         >
-          <Loader2 className="size-2.5 animate-spin" />
+          {/* Spinner by default; flips to a stop square on hover. */}
+          <Loader2 className="size-2.5 animate-spin group-hover/runpill:hidden" />
+          <Square className="size-2.5 hidden group-hover/runpill:inline fill-current" />
           {group.suggestionRunProgress ?? 0}/{group.suggestionRunTotal ?? 0}
-        </span>
+        </button>
       )}
       {group.suggestionRunStatus === "failed" && (
         <span
@@ -474,10 +521,10 @@ function GroupRow({
                 </button>
                 {group.autoAssign && (
                   <button
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
                       setMenuOpen(false);
-                      await runGroupMatcher(convex, group._id);
+                      void startRun();
                     }}
                     className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors"
                   >

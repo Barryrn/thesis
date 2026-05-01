@@ -17,6 +17,7 @@ import type * as outline from "../outline.js";
 import type * as papers from "../papers.js";
 import type * as recommendations from "../recommendations.js";
 import type * as sectionContent from "../sectionContent.js";
+import type * as sectionTodos from "../sectionTodos.js";
 import type * as sources from "../sources.js";
 import type * as summaries from "../summaries.js";
 import type * as thesisExport from "../thesisExport.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   papers: typeof papers;
   recommendations: typeof recommendations;
   sectionContent: typeof sectionContent;
+  sectionTodos: typeof sectionTodos;
   sources: typeof sources;
   summaries: typeof summaries;
   thesisExport: typeof thesisExport;

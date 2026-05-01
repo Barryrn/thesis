@@ -433,7 +433,9 @@
       "titleForGroup": "Vorschläge für \"{{name}}\"",
       "running": "Papers werden bewertet… {{done}}/{{total}}",
       "ready": "KI-Vorschläge bereit für \"{{name}}\"",
-      "failed": "Vorschlagslauf fehlgeschlagen"
+      "failed": "Vorschlagslauf fehlgeschlagen",
+      "stop": "Klicken zum Stoppen",
+      "stopped": "Vorschlagslauf für \"{{name}}\" gestoppt"
     }
   },
 
@@ -490,7 +492,39 @@
     "accept": "Übernehmen",
     "typeAtToInsert": "Tippe @ um eine Fußnoten-Zitation einzufügen",
     "formula": "Formel",
-    "startWriting": "Beginne hier deinen Thesis-Text zu schreiben..."
+    "startWriting": "Beginne hier deinen Thesis-Text zu schreiben...",
+    "autoCite": "Auto-Zitate",
+    "autoCiteTitle": "Diesen Abschnitt nach Sätzen durchsuchen, die zitiert werden sollten",
+    "autoCiteTitleDisabled": "Ordne diesem Abschnitt zuerst Paper zu",
+    "autoCiteRunning": "Erkenne…",
+    "autoCiteValidate": "Prüfen & einsetzen",
+    "autoCiteClear": "Platzhalter löschen",
+    "autoCiteClearConfirm": "Alle offenen Zitations-Platzhalter aus diesem Abschnitt entfernen?",
+    "autoCiteDetectError": "Auto-Zitate fehlgeschlagen. Bitte erneut versuchen.",
+    "autoCiteDetectSummary": "{{count}} Platzhalter eingefügt",
+    "autoCiteUnmatched": "{{count}} Vorschläge konnten nicht im Text platziert werden"
+  },
+
+  "pendingChip": {
+    "tooltip": "Benötigt Zitation",
+    "popoverTitle": "Zitationsvorschläge",
+    "scoreLabel": "Bewertung",
+    "insertDirect": "Direkt einfügen",
+    "insertIndirect": "Indirekt einfügen",
+    "dismiss": "Platzhalter verwerfen",
+    "noCandidates": "Klicke „Prüfen & einsetzen“, um Kandidaten zu bewerten."
+  },
+
+  "sectionTodoPanel": {
+    "title": "Abschnitts-TODOs",
+    "empty": "Keine offenen Aufgaben.",
+    "addPlaceholder": "Aufgabe hinzufügen…",
+    "add": "Hinzufügen",
+    "jumpToClaim": "Zur Stelle springen",
+    "autoBadge": "Automatisch erstellt aus einer fehlgeschlagenen Zitationsprüfung",
+    "completedHeading": "Erledigt",
+    "incompleteHeading": "Offen",
+    "deleteConfirm": "Diese TODO löschen?"
   },
 
   "generateSection": {

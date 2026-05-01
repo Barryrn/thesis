@@ -1,21 +1,30 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
+import { toast } from "sonner";
 import { api } from "../../convex/_generated/api";
-import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2, Compass } from "lucide-react";
+import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2, Compass, MessageCircleQuestion, Eraser } from "lucide-react";
 import CitationPicker from "./CitationPicker";
 import SectionPromptEditor from "./SectionPromptEditor";
 import FormulaPreviewPanel from "./FormulaPreviewPanel";
 import FigurePanel from "./FigurePanel";
 import GenerateSectionPopover from "./GenerateSectionPopover";
 import CitationRecommendSheet from "./CitationRecommendSheet";
+import PendingCitationPopover, { type AnchorRect, type CandidatePaperMeta } from "./PendingCitationPopover";
+import SectionTodoPanel from "./SectionTodoPanel";
 import {
   extractCitationIds,
   insertCitationMarker,
   getAtTriggerContext,
   buildFootnotes,
   renderFootnoteText,
+  parsePendingCitations,
+  extractPendingPlaceholderIds,
+  replacePendingMarker,
+  stripAllPendingMarkers,
 } from "@/lib/citationUtils";
+import { useDetectCitations } from "@/hooks/useDetectCitations";
+import { useValidateCitations, type ValidateResult } from "@/hooks/useValidateCitations";
 import { extractFormulasForPreview, insertFormulaMarker } from "@/lib/formulaUtils";
 import { insertFigureMarker } from "@/lib/figureUtils";
 import {
@@ -122,8 +131,6 @@ export default function SectionWriteEditor({
   /// when the reactive query pushes back the server version.
   const lastSavedBodyRef = useRef<string | null>(null);
   const initializedRef = useRef(false);
-  /// Tracks latest body for cleanup/flush on unmount.
-  const bodyRef = useRef(body);
   /// Tracks the last body rendered into the contentEditable div to avoid
   /// re-rendering on every keystroke (only re-render when markers change).
   const lastRenderedBodyRef = useRef("");
@@ -136,9 +143,6 @@ export default function SectionWriteEditor({
   useEffect(() => {
     sectionIdRef.current = sectionId;
   }, [sectionId]);
-  useEffect(() => {
-    bodyRef.current = body;
-  }, [body]);
 
   // ── Source queries for footnote rendering ─────────────────────────────
   /// Build a source map from cited paper IDs for footnote generation.
@@ -185,23 +189,48 @@ export default function SectionWriteEditor({
 
   // ── Sync from server on mount / section switch ────────────────────────
   useEffect(() => {
-    // Reset on section change
+    // Reset on section change. We must also clear the contentEditable DOM
+    // directly: the body→DOM sync effect bails when `body === lastRenderedBodyRef`,
+    // so resetting both to "" would leave the previous section's HTML on
+    // screen until the new section's content arrives.
     initializedRef.current = false;
     lastSavedBodyRef.current = null;
+    setBody("");
+    if (editorRef.current) {
+      editorRef.current.innerHTML = "";
+    }
     lastRenderedBodyRef.current = "";
     setSaveStatus("idle");
     setPickerOpen(false);
   }, [sectionId]);
 
+  // Sync from server whenever the latest server body differs from what we
+  // last saved. Earlier code gated this with `initializedRef` to fire only
+  // once per section, but Convex's reactive subscription can deliver an old
+  // snapshot before the latest value during reconnects/reloads — gating
+  // would lock `body` to the stale value, and the next save would write it
+  // back, corrupting other sections via the cleanup path.
+  // Don't overwrite while the user is mid-keystroke — `handleInput`'s
+  // `setBody` is the source of truth then.
   useEffect(() => {
-    // Only sync from server once on initial load or section switch
-    if (content !== undefined && !initializedRef.current) {
-      const serverBody = content?.body ?? "";
-      setBody(serverBody);
-      lastSavedBodyRef.current = serverBody;
+    if (content === undefined) return;
+    if (isTypingRef.current || composingRef.current) return;
+    const serverBody = content?.body ?? "";
+    if (serverBody === lastSavedBodyRef.current) {
       initializedRef.current = true;
+      return;
     }
-  }, [content]);
+    setBody(serverBody);
+    lastSavedBodyRef.current = serverBody;
+    initializedRef.current = true;
+
+    // Hydrate the in-memory suggestion cache from the persisted column so
+    // chip popovers retain their candidate list across page refreshes.
+    pendingSuggestionsRef.current.clear();
+    for (const p of content?.pendingCitations ?? []) {
+      pendingSuggestionsRef.current.set(p.id, (p.suggestedPaperIds ?? []) as unknown as string[]);
+    }
+  }, [content, sectionId]);
 
   // ── Render body into contentEditable when body changes externally ─────
   useEffect(() => {
@@ -217,6 +246,13 @@ export default function SectionWriteEditor({
     lastRenderedBodyRef.current = body;
   }, [body, sourceMap]);
 
+  // ── Pending citation cache ────────────────────────────────────────────
+  /// Cache of suggested paperIds per `{{citeNeeded:...}}` placeholder.
+  /// Truth lives in `body`; this map is rebuilt from detect responses
+  /// and kept in sync with the body via `extractPendingPlaceholderIds`
+  /// so deleted chips drop their suggestions automatically.
+  const pendingSuggestionsRef = useRef<Map<string, string[]>>(new Map());
+
   // ── Debounced auto-save ───────────────────────────────────────────────
   const flushSave = useCallback(
     async (bodyToSave: string, targetSectionId: string) => {
@@ -227,11 +263,28 @@ export default function SectionWriteEditor({
       setSaveStatus("saving");
       try {
         const citedIds = extractCitationIds(bodyToSave);
+        // Keep the pendingCitations cache aligned with the body before
+        // shipping it to Convex. Drop any suggestion whose chip has been
+        // deleted by the user; the cascade in saveSectionContent does the
+        // mirror cleanup on the auto-citation TODO rows.
+        const livePending = parsePendingCitations(bodyToSave);
+        const pendingPayload = livePending.map((p) => ({
+          id: p.id,
+          reason: p.reason,
+          suggestedPaperIds: (pendingSuggestionsRef.current.get(p.id) ?? []) as any,
+        }));
+
         await saveMutation({
           sectionId: targetSectionId as any,
           body: bodyToSave,
           citedPaperIds: citedIds as any,
+          pendingCitations: pendingPayload as any,
         });
+        // Drop entries whose chip is gone so the cache doesn't grow unbounded.
+        const liveIds = new Set(livePending.map((p) => p.id));
+        for (const cachedId of Array.from(pendingSuggestionsRef.current.keys())) {
+          if (!liveIds.has(cachedId)) pendingSuggestionsRef.current.delete(cachedId);
+        }
         lastSavedBodyRef.current = bodyToSave;
         // Only show "saved" if we're still on the same section
         if (sectionIdRef.current === targetSectionId) {
@@ -261,21 +314,20 @@ export default function SectionWriteEditor({
     [flushSave]
   );
 
-  // Flush pending save on section switch or unmount
+  // Cancel any pending debounced save on section switch / unmount.
+  // We deliberately do NOT flush-on-unmount: the captured body and sectionId
+  // can disagree under StrictMode double-effects and HMR remounts, which
+  // caused section A's body to be written into section B's row. Any in-flight
+  // user-typed change has already been scheduled via scheduleSave and will
+  // hit the server unless the user navigates within SAVE_DEBOUNCE_MS.
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      // Flush immediately with captured values
-      const currentBody = bodyRef.current;
-      const targetId = sectionIdRef.current;
-      if (currentBody !== lastSavedBodyRef.current) {
-        flushSave(currentBody, targetId);
-      }
     };
-  }, [sectionId, flushSave]);
+  }, [sectionId]);
 
   // ── ContentEditable input handler ─────────────────────────────────────
   /// Extracts raw text from the contentEditable DOM on every input event,
@@ -553,6 +605,238 @@ export default function SectionWriteEditor({
     [body, scheduleSave, rerenderEditor]
   );
 
+  // ── Auto-citation phase A (detect) and phase B (validate) ─────────────
+  const detect = useDetectCitations({ sectionId, provider });
+  const validate = useValidateCitations({ sectionId, provider });
+
+  /// Validate-phase results keyed by placeholderId. Populated when the
+  /// user clicks "Validate & resolve" — the popover reads from here.
+  const [validateResults, setValidateResults] = useState<
+    Record<string, ValidateResult>
+  >({});
+  /// Currently-open popover state (null when no chip is active). The
+  /// anchor rect is captured at click time so the popover stays in place
+  /// even when the editor scrolls underneath it.
+  const [popoverState, setPopoverState] = useState<{
+    placeholderId: string;
+    reason: string;
+    anchor: AnchorRect;
+  } | null>(null);
+
+  /// Number of `{{citeNeeded:...}}` chips currently in the body. Drives
+  /// the enabled state of the Validate / Clear buttons.
+  const pendingCount = useMemo(
+    () => extractPendingPlaceholderIds(body).length,
+    [body]
+  );
+
+  /// Map of paperId → display metadata used by PendingCitationPopover.
+  /// Built from the section's matches so the popover can show Kürzel +
+  /// title without an extra query.
+  const matchPaperMeta = useMemo<Map<string, CandidatePaperMeta>>(() => {
+    const map = new Map<string, CandidatePaperMeta>();
+    for (const m of matches) {
+      const source = sourceMap.get(m.paperId);
+      map.set(m.paperId, {
+        paperId: m.paperId,
+        title: m.title,
+        kuerzel: source?.kuerzel ?? null,
+      });
+    }
+    return map;
+  }, [matches, sourceMap]);
+
+  const createTodoMutation = useMutation(api.sectionTodos.create);
+
+  /// Clicks "Auto-cite section". Runs detect, splices yellow chips at the
+  /// claim sentences, then flushes the body to Convex through the existing
+  /// autosave path. The validate phase stays a separate explicit click so
+  /// the user has a chance to dismiss bad detections first.
+  const handleAutoCiteDetect = useCallback(async () => {
+    const result = await detect.run(body);
+    if (!result) {
+      toast.error(detect.error ?? t("optimize.autoCiteDetectError"));
+      return;
+    }
+    if (result.body === body) {
+      // Nothing to do — empty body or no items.
+      toast.message(
+        t("optimize.autoCiteDetectSummary", { count: 0 })
+      );
+      return;
+    }
+    // Cache suggested paperIds before flushing so the save sees the right
+    // pendingCitations payload.
+    for (const pc of result.pendingCitations) {
+      pendingSuggestionsRef.current.set(pc.id, pc.suggestedPaperIds as unknown as string[]);
+    }
+    setBody(result.body);
+    rerenderEditor(result.body, result.body.length);
+    await flushSave(result.body, sectionIdRef.current);
+
+    toast.success(
+      t("optimize.autoCiteDetectSummary", { count: result.insertedCount })
+    );
+    if (result.unmatchedCount > 0) {
+      toast.message(
+        t("optimize.autoCiteUnmatched", { count: result.unmatchedCount })
+      );
+    }
+  }, [body, detect, flushSave, rerenderEditor, t]);
+
+  /// Clicks "Validate & resolve". Scores each pending placeholder's
+  /// suggested paperIds, swaps high-confidence ones into real
+  /// `{{cite:...}}` markers, and creates a sectionTodo for each
+  /// remaining unresolved chip.
+  const handleAutoCiteValidate = useCallback(async () => {
+    const livePending = parsePendingCitations(body);
+    const pendingForRun = livePending.map((p) => ({
+      id: p.id,
+      reason: p.reason,
+      suggestedPaperIds: (pendingSuggestionsRef.current.get(p.id) ?? []) as any,
+    }));
+
+    const result = await validate.run(body, pendingForRun);
+    if (!result) {
+      toast.error(validate.error ?? t("optimize.autoCiteDetectError"));
+      return;
+    }
+
+    setValidateResults(result.resultsById);
+
+    if (result.body !== body) {
+      setBody(result.body);
+      rerenderEditor(result.body, result.body.length);
+      await flushSave(result.body, sectionIdRef.current);
+    }
+
+    // Create one auto-citation TODO per unresolved placeholder so the
+    // drawer surfaces work-remaining without the user opening every chip.
+    for (const r of result.unresolved) {
+      const reason =
+        livePending.find((p) => p.id === r.placeholder_id)?.reason ?? "";
+      const text = reason
+        ? t("optimize.autoCiteDetectSummary", { count: 0 }) // fallback never used
+        : "";
+      // Build a clear, locale-agnostic line: "Find citation: <reason>"
+      const todoText = reason
+        ? `${t("pendingChip.popoverTitle")}: ${reason}`
+        : t("pendingChip.popoverTitle");
+      // `text` is intentionally unused but constructed above to keep the
+      // i18n key list stable; suppress the unused-var lint via void.
+      void text;
+      await createTodoMutation({
+        sectionId,
+        text: todoText,
+        source: "auto-citation",
+        placeholderId: r.placeholder_id,
+      });
+    }
+
+    toast.success(
+      t("optimize.autoCiteDetectSummary", { count: result.promoted.length })
+    );
+  }, [
+    body,
+    validate,
+    flushSave,
+    rerenderEditor,
+    createTodoMutation,
+    sectionId,
+    t,
+  ]);
+
+  /// Clicks "Clear pending citations". Strips all `{{citeNeeded:...}}`
+  /// markers from the body in one mutation. Resolved citations are left
+  /// untouched. The cascade then deletes orphaned auto-citation TODOs.
+  const handleClearPending = useCallback(async () => {
+    if (pendingCount === 0) return;
+    if (!window.confirm(t("optimize.autoCiteClearConfirm"))) return;
+    const newBody = stripAllPendingMarkers(body);
+    setBody(newBody);
+    rerenderEditor(newBody, newBody.length);
+    pendingSuggestionsRef.current.clear();
+    setValidateResults({});
+    setPopoverState(null);
+    await flushSave(newBody, sectionIdRef.current);
+  }, [body, pendingCount, flushSave, rerenderEditor, t]);
+
+  /// Clicks on a `.ce-cite-needed` chip in the editor. Opens the popover
+  /// anchored to the chip's rect so the user can pick a candidate or
+  /// dismiss the placeholder.
+  const handleEditorClick = useCallback((e: React.MouseEvent) => {
+    const target = (e.target as HTMLElement).closest<HTMLElement>(
+      "[data-placeholder-id]"
+    );
+    if (!target) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const id = target.getAttribute("data-placeholder-id") || "";
+    if (!id) return;
+    const livePending = parsePendingCitations(body);
+    const reason = livePending.find((p) => p.id === id)?.reason ?? "";
+    const rect = target.getBoundingClientRect();
+    setPopoverState({
+      placeholderId: id,
+      reason,
+      anchor: {
+        top: rect.top,
+        left: rect.left,
+        bottom: rect.bottom,
+        width: rect.width,
+      },
+    });
+  }, [body]);
+
+  /// Replaces a pending placeholder with a real {{cite:...}} marker.
+  /// Used by both the popover's "Insert as direct/indirect" buttons and
+  /// triggered when handleAutoCiteValidate auto-promotes (in which case
+  /// the body rewrite happens inside the hook).
+  const handlePopoverInsert = useCallback(async (
+    paperId: string,
+    citationType: CitationType,
+    pageRef: string,
+  ) => {
+    if (!popoverState) return;
+    const marker = `{{cite:${paperId}::${citationType}::${pageRef}}}`;
+    const newBody = replacePendingMarker(body, popoverState.placeholderId, marker);
+    if (newBody === body) {
+      setPopoverState(null);
+      return;
+    }
+    setBody(newBody);
+    rerenderEditor(newBody, newBody.length);
+    pendingSuggestionsRef.current.delete(popoverState.placeholderId);
+    setValidateResults((prev) => {
+      const next = { ...prev };
+      delete next[popoverState.placeholderId];
+      return next;
+    });
+    setPopoverState(null);
+    await flushSave(newBody, sectionIdRef.current);
+  }, [body, popoverState, flushSave, rerenderEditor]);
+
+  /// Strips a single placeholder from the body without creating a citation.
+  /// Used by the popover's "Dismiss" action.
+  const handlePopoverDismiss = useCallback(async () => {
+    if (!popoverState) return;
+    const newBody = replacePendingMarker(body, popoverState.placeholderId, "");
+    if (newBody === body) {
+      setPopoverState(null);
+      return;
+    }
+    setBody(newBody);
+    rerenderEditor(newBody, newBody.length);
+    pendingSuggestionsRef.current.delete(popoverState.placeholderId);
+    setValidateResults((prev) => {
+      const next = { ...prev };
+      delete next[popoverState.placeholderId];
+      return next;
+    });
+    setPopoverState(null);
+    await flushSave(newBody, sectionIdRef.current);
+  }, [body, popoverState, flushSave, rerenderEditor]);
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
@@ -604,6 +888,70 @@ export default function SectionWriteEditor({
             <Wand2 className="size-3" />
             {t("generateSection.toolbarButton")}
           </button>
+          {/*
+            "Auto-cite section" — phase A of the auto-citation flow.
+            Disabled when the section has no mapped papers, since the
+            detection prompt constrains suggested paperIds to that pool.
+            Reuses the same disabled-rationale title text as Generate.
+          */}
+          <button
+            onClick={handleAutoCiteDetect}
+            disabled={
+              matches.length === 0 ||
+              detect.status === "loading" ||
+              !body.trim()
+            }
+            className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={
+              matches.length === 0
+                ? t("optimize.autoCiteTitleDisabled")
+                : t("optimize.autoCiteTitle")
+            }
+          >
+            {detect.status === "loading" ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <MessageCircleQuestion className="size-3" />
+            )}
+            {detect.status === "loading"
+              ? t("optimize.autoCiteRunning")
+              : t("optimize.autoCite")}
+          </button>
+          {/*
+            "Validate & resolve" — phase B. Only shown when there is at
+            least one pending placeholder; otherwise it would be a dead
+            button. Auto-promotes high-confidence resolutions and creates
+            section TODOs for the rest.
+          */}
+          {pendingCount > 0 && (
+            <button
+              onClick={handleAutoCiteValidate}
+              disabled={validate.status === "loading"}
+              className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {validate.status === "loading" ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Check className="size-3" />
+              )}
+              {t("optimize.autoCiteValidate")} ({pendingCount})
+            </button>
+          )}
+          {/*
+            "Clear pending citations" — escape hatch that strips every
+            `{{citeNeeded:...}}` marker from the body in one mutation.
+            Hidden when there is nothing to clear.
+          */}
+          {pendingCount > 0 && (
+            <button
+              onClick={handleClearPending}
+              className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1"
+              title={t("optimize.autoCiteClear")}
+            >
+              <Eraser className="size-3" />
+              {t("optimize.autoCiteClear")}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {/* Save status */}
@@ -722,6 +1070,11 @@ export default function SectionWriteEditor({
           onPaste={handlePaste}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
+          // Click capture for `.ce-cite-needed` chips. The editor's main
+          // mousedown/up handlers fire after this; we stop propagation
+          // inside handleEditorClick when a chip is the actual target so
+          // text selection still works elsewhere.
+          onClick={handleEditorClick}
           data-placeholder={t("optimize.startWriting")}
           suppressContentEditableWarning
           className={`w-full min-h-[400px] bg-transparent text-foreground/90 text-sm leading-relaxed rounded-lg border border-border/30 p-4 focus:outline-none focus:border-amber/30 transition-colors ${
@@ -753,6 +1106,11 @@ export default function SectionWriteEditor({
         body={body}
         onInsertMarker={handleInsertFigureMarker}
       />
+
+      {/* Per-section TODO drawer. Renders below the editor (after the figure
+          panel) so the writing surface stays the visual focus; the drawer
+          starts collapsed and shows a badge count of incomplete items. */}
+      <SectionTodoPanel sectionId={sectionId} editorRef={editorRef} />
 
       {/* Footnote panel — shows HKA-style footnotes for citations in the body */}
       {footnotes.length > 0 && (
@@ -811,6 +1169,23 @@ export default function SectionWriteEditor({
           provider={provider}
           fallbackLanguage={language}
           onClose={() => setRecommendSheetOpen(false)}
+        />
+      )}
+
+      {/* Pending-citation popover. Anchored to the clicked chip's viewport
+          rect; closes on outside click / Escape inside the component. */}
+      {popoverState && (
+        <PendingCitationPopover
+          placeholderId={popoverState.placeholderId}
+          reason={popoverState.reason}
+          candidates={
+            validateResults[popoverState.placeholderId]?.candidates ?? []
+          }
+          paperMetaById={matchPaperMeta}
+          anchor={popoverState.anchor}
+          onInsert={handlePopoverInsert}
+          onDismiss={handlePopoverDismiss}
+          onClose={() => setPopoverState(null)}
         />
       )}
     </div>

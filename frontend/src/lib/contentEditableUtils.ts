@@ -6,8 +6,13 @@
 
 // ── Regex patterns (mirrored from citationUtils / formulaUtils / figureUtils) ──
 
-/// Matches any citation marker: {{cite:...}}
-const CITE_ANY_RE = /\{\{cite:[^}]+\}\}/;
+/// Matches any resolved citation marker: {{cite:...}}.
+/// Negative lookahead `(?!Needed)` keeps `{{citeNeeded:...}}` placeholders
+/// out of this branch so they render as their own chip, not a footnote sup.
+const CITE_ANY_RE = /\{\{cite:(?!Needed)[^}]+\}\}/;
+
+/// Matches unresolved auto-citation placeholders: {{citeNeeded:ID::REASON}}.
+const CITE_NEEDED_RE = /\{\{citeNeeded:[a-z0-9]+::[^}]*\}\}/;
 
 /// Matches figure markers: {{fig:...}}
 const FIG_MARKER_RE = /\{\{fig:[^}]+\}\}/;
@@ -19,8 +24,11 @@ const DISPLAY_MATH_RE = /\$\$([^$]+?)\$\$/;
 const INLINE_MATH_RE = /(?<!\$)\$(?!\$)(\S[^$]*?\S|\S)\$(?!\$)/;
 
 /// Combined splitting regex — captures all marker types so `split` retains them.
+/// `{{citeNeeded:...}}` appears before `{{cite:...}}` so JS's left-to-right
+/// alternation picks the more specific token first (although the resolved
+/// branch's `(?!Needed)` lookahead also prevents collision).
 const ALL_MARKERS_RE =
-  /(\{\{cite:[^}]+\}\}|\{\{fig:[^}]+\}\}|\$\$[^$]+?\$\$|(?<!\$)\$(?!\$)(?:\S[^$]*?\S|\S)\$(?!\$))/;
+  /(\{\{citeNeeded:[a-z0-9]+::[^}]*\}\}|\{\{cite:(?!Needed)[^}]+\}\}|\{\{fig:[^}]+\}\}|\$\$[^$]+?\$\$|(?<!\$)\$(?!\$)(?:\S[^$]*?\S|\S)\$(?!\$))/;
 
 // ── HTML escaping ───────────────────────────────────────────────────
 
@@ -70,6 +78,28 @@ export function rawTextToDecoratedHtml(
       html +=
         `<span class="ce-citation" data-marker="${escapeHtml(part)}" contenteditable="false">` +
         `<sup>${num}</sup></span>`;
+    } else if (CITE_NEEDED_RE.test(part)) {
+      // Unresolved auto-citation placeholder. Render as a yellow striped chip
+      // with a `?` superscript. The `data-placeholder-id` attribute lets the
+      // editor wire click handlers (popover + jump-from-TODO) without parsing
+      // the marker again. Reason is decoded into `title` for hover tooltip.
+      const inner = part.slice("{{citeNeeded:".length, -2);
+      const sepIdx = inner.indexOf("::");
+      const idStr = sepIdx >= 0 ? inner.slice(0, sepIdx) : inner;
+      const encodedReason = sepIdx >= 0 ? inner.slice(sepIdx + 2) : "";
+      let decodedReason = encodedReason;
+      try {
+        decodedReason = decodeURIComponent(encodedReason);
+      } catch {
+        // Malformed `%XX` — fall back to the encoded form.
+      }
+      html +=
+        `<span class="ce-cite-needed" ` +
+        `data-marker="${escapeHtml(part)}" ` +
+        `data-placeholder-id="${escapeHtml(idStr)}" ` +
+        `title="${escapeHtml(decodedReason)}" ` +
+        `contenteditable="false">` +
+        `<sup>?</sup></span>`;
     } else if (DISPLAY_MATH_RE.test(part) && part.startsWith("$$")) {
       // Display formula — render as editable styled text so the user can
       // click into, edit, and delete formula content directly.

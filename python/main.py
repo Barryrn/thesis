@@ -814,6 +814,160 @@ async def generate_section(req: GenerateSectionRequest):
     )
 
 
+class DetectCitationsRequest(BaseModel):
+    """Request body for the auto-citation detect phase.
+
+    The frontend posts the live section body so the model marks claims
+    against the prose the user is currently editing — not whatever was
+    last saved to Convex. The sectionId is still required so we can
+    fetch the matched-papers context for grounding.
+    """
+    sectionId: str
+    body: str
+    provider: str = "anthropic"
+
+
+@app.post("/detect-citations")
+async def detect_citations(req: DetectCitationsRequest):
+    """Walk a section body and return the sentences that need citations.
+
+    Synchronous (non-streaming) JSON call. The frontend cannot act on a
+    partial result, so streaming would only complicate the contract.
+    Long bodies are paragraph-chunked behind the scenes; results from
+    each chunk are merged before validation.
+    """
+    logger = get_logger()
+    logger.info(
+        f"Detect-citations started: sectionId={req.sectionId}, provider={req.provider}, "
+        f"chars={len(req.body)}",
+        extra={"step": "auto_cite_detect", "status": "started"},
+    )
+
+    try:
+        ctx = await run_in_threadpool(
+            convex_client.get_generation_context, req.sectionId
+        )
+        if not ctx:
+            return JSONResponse(status_code=404, content={"detail": "Section not found"})
+        if not (ctx.get("matches") or []):
+            # With no mapped papers there is nothing to cite. Frontend
+            # should disable the button, but we return a clean empty
+            # result rather than 4xx-ing so a stale UI degrades gracefully.
+            return {"items": [], "warnings": ["No mapped papers for this section."]}
+
+        payload = section_writer.build_context_payload(ctx)
+        allowed_ids = [m["paperId"] for m in payload.get("matches") or []]
+
+        chunks = section_writer.chunk_body_for_detection(req.body)
+        merged_items: list[dict] = []
+        merged_warnings: list[str] = []
+
+        for chunk in chunks:
+            system, user = section_writer.build_detect_messages(payload, chunk)
+            raw = await run_in_threadpool(
+                ai_client.chat_completion,
+                req.provider,
+                "writer",
+                system,
+                user,
+                4096,
+            )
+            parsed = section_writer.parse_detect_response(raw, allowed_ids)
+            merged_items.extend(parsed.get("items", []))
+            merged_warnings.extend(parsed.get("warnings", []))
+
+        logger.info(
+            f"Detect-citations completed: items={len(merged_items)}, "
+            f"chunks={len(chunks)}, warnings={len(merged_warnings)}",
+            extra={"step": "auto_cite_detect", "status": "completed"},
+        )
+        return {"items": merged_items, "warnings": merged_warnings}
+    except Exception as e:
+        logger.error(
+            f"Detect-citations failed: {type(e).__name__}: {e}",
+            extra={"step": "auto_cite_detect", "status": "failed"},
+        )
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+class ValidateCitationItem(BaseModel):
+    """One placeholder the validate phase should score."""
+    placeholder_id: str
+    claim_sentence: str
+    candidate_paper_ids: list[str]
+
+
+class ValidateCitationsRequest(BaseModel):
+    """Request body for the auto-citation validate phase."""
+    sectionId: str
+    body: str
+    items: list[ValidateCitationItem]
+    provider: str = "anthropic"
+
+
+@app.post("/validate-citations")
+async def validate_citations(req: ValidateCitationsRequest):
+    """Score each placeholder's candidate paperIds against its claim.
+
+    Returns a per-placeholder list of candidates with score, page ref
+    drawn from a real excerpt, and a one-sentence justification. The
+    frontend applies the auto-insert threshold (≥0.75) and creates a
+    section TODO for any unresolved placeholder.
+    """
+    logger = get_logger()
+    logger.info(
+        f"Validate-citations started: sectionId={req.sectionId}, "
+        f"items={len(req.items)}, provider={req.provider}",
+        extra={"step": "auto_cite_validate", "status": "started"},
+    )
+
+    try:
+        if not req.items:
+            return {"results": []}
+
+        ctx = await run_in_threadpool(
+            convex_client.get_generation_context, req.sectionId
+        )
+        if not ctx:
+            return JSONResponse(status_code=404, content={"detail": "Section not found"})
+
+        payload = section_writer.build_context_payload(ctx)
+        allowed_ids = [m["paperId"] for m in payload.get("matches") or []]
+        allowed_pages = section_writer.collect_allowed_pages_by_paper(payload)
+
+        items_dicts = [item.model_dump() for item in req.items]
+        batches = section_writer.chunk_validate_items(items_dicts)
+        merged: list[dict] = []
+
+        for batch in batches:
+            system, user = section_writer.build_validate_messages(payload, batch)
+            raw = await run_in_threadpool(
+                ai_client.chat_completion,
+                req.provider,
+                "writer",
+                system,
+                user,
+                4096,
+            )
+            parsed = section_writer.parse_validate_response(
+                raw, allowed_ids, allowed_pages
+            )
+            merged.extend(parsed.get("results", []))
+
+        logger.info(
+            f"Validate-citations completed: results={len(merged)}, "
+            f"batches={len(batches)}",
+            extra={"step": "auto_cite_validate", "status": "completed"},
+        )
+        return {"results": merged}
+    except Exception as e:
+        logger.error(
+            f"Validate-citations failed: {type(e).__name__}: {e}",
+            extra={"step": "auto_cite_validate", "status": "failed"},
+        )
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 @app.post("/export")
 async def export_docx():
     """Generate and return the complete thesis as a .docx file.

@@ -37,12 +37,19 @@ interface GroupArg {
 /// Run the matcher for a single group. Drives the full lifecycle:
 ///   start run → score each paper → record matches → finish run.
 /// Returns the number of new suggestions written (for the toast).
+///
+/// Pass `signal` to allow the caller to stop the run mid-flight. When the
+/// signal aborts:
+///   • the in-flight fetch is cancelled (AbortController on fetch)
+///   • the per-paper loop exits at its next checkpoint
+///   • finishSuggestionRun is still called so the spinner clears
 export async function runGroupMatcher(
   convex: ConvexReactClient,
   groupId: Id<"paperGroups">,
-  options: { provider?: "anthropic" | "openai" } = {}
+  options: { provider?: "anthropic" | "openai"; signal?: AbortSignal } = {}
 ): Promise<number> {
   const provider = options.provider ?? "anthropic";
+  const signal = options.signal;
 
   // 1. Fetch the work list. Convex applies all the filters here so the
   //    client never has to know about declines / memberships / hashes.
@@ -81,10 +88,17 @@ export async function runGroupMatcher(
   let writtenSuggestions = 0;
   let lastError: string | undefined;
 
+  let aborted = false;
   try {
     // 3. Score one paper per Python call. Per-paper round-trips give live
     //    progress in the UI, and one failure can't take down the whole run.
     for (const paper of papers) {
+      // Honor the abort signal at every loop iteration, before any new
+      // network call. Already-written suggestions are preserved.
+      if (signal?.aborted) {
+        aborted = true;
+        break;
+      }
       try {
         const res = await fetch(`${PYTHON_SERVICE_URL}/suggest-groups`, {
           method: "POST",
@@ -94,6 +108,8 @@ export async function runGroupMatcher(
             groups: [groupArg],
             provider,
           }),
+          // Cancels the in-flight HTTP request when the user clicks Stop.
+          signal,
         });
         if (!res.ok) {
           const body = await res.text().catch(() => "<unreadable>");
@@ -115,10 +131,13 @@ export async function runGroupMatcher(
           }
         }
       } catch (err) {
-        // Network failures here usually mean Python isn't running. We log
-        // and continue so the UI at least counts the paper as "processed",
-        // and the toast will surface the underlying error via lastError
-        // if every call failed.
+        // AbortError from fetch is the user clicking Stop — exit the loop
+        // cleanly. Any other error is a real failure: log and continue so
+        // one bad paper can't take down the whole run.
+        if (err instanceof DOMException && err.name === "AbortError") {
+          aborted = true;
+          break;
+        }
         console.error("[matcher] per-paper fetch failed:", err);
         lastError = err instanceof Error ? err.message : String(err);
       }
@@ -128,14 +147,24 @@ export async function runGroupMatcher(
       });
     }
   } finally {
-    // 4. Always close the run, even on uncaught exceptions, so the spinner
-    //    doesn't get stuck forever.
+    // 4. Always close the run, even on uncaught exceptions or abort, so the
+    //    spinner doesn't get stuck forever. Abort isn't surfaced as an error
+    //    — the user already knows they cancelled.
     await convex.mutation(api.groups.finishSuggestionRun, {
       groupId,
-      // Only surface the error if we got zero suggestions — otherwise a
-      // single transient failure shouldn't paint the whole run red.
-      error: writtenSuggestions === 0 ? lastError : undefined,
+      // Only surface the error if we got zero suggestions and weren't
+      // aborted — a single transient failure shouldn't paint the run red,
+      // and a deliberate stop isn't a failure at all.
+      error:
+        writtenSuggestions === 0 && !aborted ? lastError : undefined,
     });
+  }
+
+  if (aborted) {
+    console.log(
+      `[matcher] run aborted for "${group.name}": ${writtenSuggestions} suggestion(s) written before stop`
+    );
+    return writtenSuggestions;
   }
 
   console.log(

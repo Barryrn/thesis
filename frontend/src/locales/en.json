@@ -433,7 +433,9 @@
       "titleForGroup": "Suggestions for \"{{name}}\"",
       "running": "Scoring papers… {{done}}/{{total}}",
       "ready": "AI suggestions ready for \"{{name}}\"",
-      "failed": "Suggestion run failed"
+      "failed": "Suggestion run failed",
+      "stop": "Click to stop",
+      "stopped": "Stopped suggestion run for \"{{name}}\""
     }
   },
 
@@ -490,7 +492,39 @@
     "accept": "Accept",
     "typeAtToInsert": "Type @ to insert a footnote citation",
     "formula": "Formula",
-    "startWriting": "Start writing your thesis text here..."
+    "startWriting": "Start writing your thesis text here...",
+    "autoCite": "Auto-cite",
+    "autoCiteTitle": "Scan this section for sentences that need citations",
+    "autoCiteTitleDisabled": "Map papers to this section before auto-citing",
+    "autoCiteRunning": "Detecting…",
+    "autoCiteValidate": "Validate & resolve",
+    "autoCiteClear": "Clear pending",
+    "autoCiteClearConfirm": "Remove all unresolved citation placeholders from this section?",
+    "autoCiteDetectError": "Auto-cite failed. Please try again.",
+    "autoCiteDetectSummary": "{{count}} placeholders inserted",
+    "autoCiteUnmatched": "{{count}} suggestions could not be placed in the prose"
+  },
+
+  "pendingChip": {
+    "tooltip": "Needs citation",
+    "popoverTitle": "Suggested citations",
+    "scoreLabel": "Score",
+    "insertDirect": "Insert as direct",
+    "insertIndirect": "Insert as indirect",
+    "dismiss": "Dismiss placeholder",
+    "noCandidates": "Click \"Validate & resolve\" to score candidates."
+  },
+
+  "sectionTodoPanel": {
+    "title": "Section TODOs",
+    "empty": "No open items.",
+    "addPlaceholder": "Add a task…",
+    "add": "Add",
+    "jumpToClaim": "Jump to claim",
+    "autoBadge": "Auto-created from a failed citation validation",
+    "completedHeading": "Completed",
+    "incompleteHeading": "Open",
+    "deleteConfirm": "Delete this TODO?"
   },
 
   "generateSection": {

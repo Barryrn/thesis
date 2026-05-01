@@ -2,19 +2,35 @@ import type { CitationType, FootnoteEntry, ParsedCitation } from "./types";
 import type { Doc } from "../../convex/_generated/dataModel";
 
 // ── Regex patterns for HKA footnote citation markers ───────────────────
+//
+// All resolved-citation regexes use a `cite:(?!Needed)` negative lookahead so
+// that the unresolved placeholder syntax `{{citeNeeded:...}}` introduced by
+// the auto-citation feature is never accidentally classified as a real
+// citation. The two grammars share a `{{cite` prefix; only the lookahead
+// keeps them distinct without renaming the existing marker format.
 
 /// Primary citation: {{cite:PAPER_ID::direct|indirect::PAGE_REF}}
 const CITE_REGEX =
-  /\{\{cite:([^:]+)::(direct|indirect)::([^}]+)\}\}/g;
+  /\{\{cite:(?!Needed)([^:]+)::(direct|indirect)::([^}]+)\}\}/g;
 
 /// Secondary source: {{cite:PAPER_ID::direct|indirect::PAGE_REF::via:SEC_ID::SEC_PAGE}}
 const CITE_SECONDARY_REGEX =
-  /\{\{cite:([^:]+)::(direct|indirect)::([^:]+)::via:([^:]+)::([^}]+)\}\}/g;
+  /\{\{cite:(?!Needed)([^:]+)::(direct|indirect)::([^:]+)::via:([^:]+)::([^}]+)\}\}/g;
 
 /// Combined regex matching both primary and secondary markers.
 /// Group layout differs by branch, so we parse with `parseCitations` instead.
 const CITE_ANY_REGEX =
-  /\{\{cite:[^}]+\}\}/g;
+  /\{\{cite:(?!Needed)[^}]+\}\}/g;
+
+/// Unresolved auto-citation placeholder: {{citeNeeded:ID::ENCODED_REASON}}.
+/// `ID` is an 8+ char [a-z0-9] token; `ENCODED_REASON` is `encodeURIComponent`-
+/// encoded so it cannot contain `:` or `}` and is therefore safe to terminate
+/// with `}}`. Capture groups: 1 = id, 2 = encoded reason.
+const CITE_NEEDED_REGEX = /\{\{citeNeeded:([a-z0-9]+)::([^}]*)\}\}/g;
+
+/// Maximum length of `encodeURIComponent(reason)` stored in the marker.
+/// Truncate raw input before encoding to avoid splitting a `%XX` triplet.
+const MAX_ENCODED_REASON_LEN = 240;
 
 // ── Parsing ────────────────────────────────────────────────────────────
 
@@ -368,25 +384,44 @@ export function getCaretCoordinates(
 
 // ── AI optimize placeholder utilities ──────────────────────────────────
 
-/// Replaces all citation markers with numbered [REF1], [REF2], etc.
+/// Replaces all citation markers with numbered [REF1], [REF2], etc., and all
+/// unresolved `{{citeNeeded:...}}` placeholders with [REFCN1], [REFCN2], etc.
 /// Returns the cleaned text and a map to restore the original markers later.
-/// Used before sending text to the AI optimizer so citations are never mangled.
+/// Used before sending text to the AI optimizer so citations are never mangled
+/// — both flavors round-trip even when the optimizer rewrites surrounding prose.
 export function replaceCitationsWithPlaceholders(text: string): {
   cleaned: string;
   placeholders: Map<string, string>;
 } {
   const placeholders = new Map<string, string>();
-  let counter = 1;
   const markerToRef = new Map<string, string>();
+  let refCounter = 1;
+  let cnCounter = 1;
 
-  const cleaned = text.replace(
+  // Resolved citations first. The CITE_ANY_REGEX uses a (?!Needed) lookahead
+  // so it never matches a pending marker — order between the two replaces is
+  // therefore safe.
+  let cleaned = text.replace(
     new RegExp(CITE_ANY_REGEX.source, "g"),
     (fullMatch) => {
-      if (markerToRef.has(fullMatch)) {
-        return markerToRef.get(fullMatch)!;
-      }
-      const ref = `[REF${counter}]`;
-      counter++;
+      const cached = markerToRef.get(fullMatch);
+      if (cached) return cached;
+      const ref = `[REF${refCounter++}]`;
+      markerToRef.set(fullMatch, ref);
+      placeholders.set(ref, fullMatch);
+      return ref;
+    }
+  );
+
+  // Pending placeholders use the [REFCN…] namespace so they never collide
+  // with [REF…]. Sentinel ordering matters at restore time — see
+  // `restorePlaceholders` which sorts keys to avoid prefix collisions.
+  cleaned = cleaned.replace(
+    new RegExp(CITE_NEEDED_REGEX.source, "g"),
+    (fullMatch) => {
+      const cached = markerToRef.get(fullMatch);
+      if (cached) return cached;
+      const ref = `[REFCN${cnCounter++}]`;
       markerToRef.set(fullMatch, ref);
       placeholders.set(ref, fullMatch);
       return ref;
@@ -425,7 +460,114 @@ export function restorePlaceholders(
 }
 
 /// Removes all citation markers from text, leaving clean prose.
-/// Used to produce clean context for the AI optimizer.
+/// Used to produce clean context for the AI optimizer. Strips both resolved
+/// `{{cite:...}}` and unresolved `{{citeNeeded:...}}` placeholders so the
+/// optimizer never sees raw marker syntax in either form.
 export function stripCitationMarkers(text: string): string {
-  return text.replace(new RegExp(CITE_ANY_REGEX.source, "g"), "");
+  return text
+    .replace(new RegExp(CITE_ANY_REGEX.source, "g"), "")
+    .replace(new RegExp(CITE_NEEDED_REGEX.source, "g"), "");
+}
+
+// ── Pending citation (auto-cite) helpers ───────────────────────────────
+
+/// Parsed pending placeholder. The `reason` field is already URI-decoded; the
+/// `fullMatch` round-trips via `String#replace` for in-place rewrites.
+export interface ParsedPendingCitation {
+  fullMatch: string;
+  id: string;
+  reason: string;
+}
+
+/// Walks the body for `{{citeNeeded:...}}` markers in document order and
+/// returns the decoded reason for each. Order is stable and matches the
+/// order of the chips the editor renders.
+export function parsePendingCitations(body: string): ParsedPendingCitation[] {
+  const out: ParsedPendingCitation[] = [];
+  const re = new RegExp(CITE_NEEDED_REGEX.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    out.push({
+      fullMatch: m[0],
+      id: m[1],
+      reason: decodeReason(m[2]),
+    });
+  }
+  return out;
+}
+
+/// Returns the placeholderIds present in `body`, in document order. Used by
+/// the saveSectionContent cascade to detect orphaned auto-citation TODOs.
+export function extractPendingPlaceholderIds(body: string): string[] {
+  return parsePendingCitations(body).map((p) => p.id);
+}
+
+/// Replaces a single `{{citeNeeded:<id>::...}}` marker with `replacement`.
+/// `placeholderId` is unique within a body, so an exact-string replace is safe.
+/// Returns the original body unchanged when the placeholder is not present.
+export function replacePendingMarker(
+  body: string,
+  placeholderId: string,
+  replacement: string
+): string {
+  const re = new RegExp(
+    `\\{\\{citeNeeded:${placeholderId}::[^}]*\\}\\}`,
+    "g"
+  );
+  return body.replace(re, replacement);
+}
+
+/// Strips every `{{citeNeeded:...}}` marker from `body`, leaving resolved
+/// `{{cite:...}}` markers untouched. Powers the "Clear pending citations"
+/// toolbar escape hatch.
+export function stripAllPendingMarkers(body: string): string {
+  return body.replace(new RegExp(CITE_NEEDED_REGEX.source, "g"), "");
+}
+
+/// Generates a placeholder id: 8-char lowercase alphanumeric. Uses the Web
+/// Crypto API for entropy; collision probability inside one section is
+/// astronomically low. Callers should still de-dupe against the live body.
+export function generatePlaceholderId(): string {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  // Base36 over 6 bytes ≈ 9-10 chars; slice to 8 for stable width.
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  return n.toString(36).padStart(8, "0").slice(0, 8);
+}
+
+/// URI-encodes a free-text reason, capping the encoded length so the marker
+/// stays compact. Truncation happens on the raw string first to avoid
+/// splitting a `%XX` triplet. Output is always `decodeURIComponent`-safe.
+export function encodeReason(raw: string): string {
+  let encoded = encodeURIComponent(raw);
+  if (encoded.length <= MAX_ENCODED_REASON_LEN) return encoded;
+
+  // Truncate raw progressively until the encoded form fits. Most reasons are
+  // short — this loop runs at most a handful of times.
+  let truncated = raw;
+  while (
+    encoded.length > MAX_ENCODED_REASON_LEN &&
+    truncated.length > 0
+  ) {
+    truncated = truncated.slice(0, Math.max(0, truncated.length - 8));
+    encoded = encodeURIComponent(truncated);
+  }
+  return encoded;
+}
+
+/// Decodes a reason string from a `{{citeNeeded:...}}` marker. Falls back to
+/// the raw input if decoding throws (e.g. malformed `%XX`), so a corrupt
+/// marker never breaks rendering.
+export function decodeReason(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
+}
+
+/// Builds a `{{citeNeeded:<id>::<encodedReason>}}` marker from raw inputs.
+export function buildPendingMarker(id: string, reason: string): string {
+  return `{{citeNeeded:${id}::${encodeReason(reason)}}}`;
 }

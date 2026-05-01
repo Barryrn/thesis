@@ -13,6 +13,14 @@ import {
   restorePlaceholders,
   stripCitationMarkers,
   getAtTriggerContext,
+  parsePendingCitations,
+  extractPendingPlaceholderIds,
+  replacePendingMarker,
+  stripAllPendingMarkers,
+  generatePlaceholderId,
+  encodeReason,
+  decodeReason,
+  buildPendingMarker,
 } from "../citationUtils";
 import type { FootnoteEntry } from "../types";
 
@@ -236,6 +244,192 @@ describe("stripCitationMarkers", () => {
     const body =
       "Before {{cite:p1::direct::S. 1}} after {{cite:p2::indirect::S. 2}} end";
     expect(stripCitationMarkers(body)).toBe("Before  after  end");
+  });
+});
+
+// ── Pending placeholder isolation ───────────────────────────────────
+//
+// Critical regression guard: the resolved-citation regexes use a
+// `cite:(?!Needed)` lookahead so that `{{citeNeeded:...}}` is never matched
+// as a real citation. A misclassification would let a footnote slip into the
+// reading flow before the user has resolved it.
+
+describe("citeNeeded isolation", () => {
+  it("parseCitations ignores pending placeholders", () => {
+    const body =
+      "Claim {{citeNeeded:abc12345::Needs%20support}} continues here.";
+    expect(parseCitations(body)).toHaveLength(0);
+  });
+
+  it("extractCitationIds ignores pending placeholders", () => {
+    const body =
+      "{{citeNeeded:abc12345::Reason}} {{cite:p1::direct::S. 1}}";
+    expect(extractCitationIds(body)).toEqual(["p1"]);
+  });
+
+  it("stripCitationMarkers removes both resolved and pending markers", () => {
+    const body =
+      "A {{cite:p1::direct::S. 1}} B {{citeNeeded:abc12345::why}} C";
+    expect(stripCitationMarkers(body)).toBe("A  B  C");
+  });
+
+  it("replaceCitationsWithPlaceholders namespaces pending placeholders as REFCN", () => {
+    const original =
+      "{{cite:p1::direct::S. 1}} mix {{citeNeeded:abc12345::Reason}}";
+    const { cleaned, placeholders } =
+      replaceCitationsWithPlaceholders(original);
+
+    expect(cleaned).toContain("[REF1]");
+    expect(cleaned).toContain("[REFCN1]");
+    expect(cleaned).not.toContain("{{cite");
+
+    const { restoredText, missingRefs } = restorePlaceholders(
+      cleaned,
+      placeholders
+    );
+    expect(restoredText).toBe(original);
+    expect(missingRefs).toHaveLength(0);
+  });
+});
+
+// ── parsePendingCitations / extractPendingPlaceholderIds ────────────
+
+describe("parsePendingCitations", () => {
+  it("returns id and decoded reason in document order", () => {
+    const body =
+      "First {{citeNeeded:aaaa1111::Empirical%20claim}} then " +
+      "{{citeNeeded:bbbb2222::Theoretical%20ref}} end.";
+    const result = parsePendingCitations(body);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({
+      id: "aaaa1111",
+      reason: "Empirical claim",
+    });
+    expect(result[1]).toMatchObject({
+      id: "bbbb2222",
+      reason: "Theoretical ref",
+    });
+  });
+
+  it("falls back to encoded form when reason is malformed", () => {
+    // A stray `%` not followed by a hex pair makes decodeURIComponent throw.
+    const body = "{{citeNeeded:abc12345::bad%ZZreason}}";
+    const result = parsePendingCitations(body);
+    expect(result).toHaveLength(1);
+    expect(result[0].reason).toBe("bad%ZZreason");
+  });
+
+  it("survives an empty reason segment", () => {
+    const body = "{{citeNeeded:abc12345::}}";
+    const result = parsePendingCitations(body);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("abc12345");
+    expect(result[0].reason).toBe("");
+  });
+});
+
+describe("extractPendingPlaceholderIds", () => {
+  it("returns ids in document order", () => {
+    const body =
+      "{{citeNeeded:aaaa1111::r}} text {{citeNeeded:bbbb2222::r}}";
+    expect(extractPendingPlaceholderIds(body)).toEqual([
+      "aaaa1111",
+      "bbbb2222",
+    ]);
+  });
+
+  it("returns empty for body without pending markers", () => {
+    expect(
+      extractPendingPlaceholderIds("plain prose {{cite:p1::direct::S. 1}}")
+    ).toEqual([]);
+  });
+});
+
+// ── replacePendingMarker / stripAllPendingMarkers ───────────────────
+
+describe("replacePendingMarker", () => {
+  it("replaces only the targeted placeholder", () => {
+    const body =
+      "{{citeNeeded:aaaa1111::r1}} and {{citeNeeded:bbbb2222::r2}}";
+    const result = replacePendingMarker(
+      body,
+      "aaaa1111",
+      "{{cite:p1::indirect::S. 5}}"
+    );
+    expect(result).toBe(
+      "{{cite:p1::indirect::S. 5}} and {{citeNeeded:bbbb2222::r2}}"
+    );
+  });
+
+  it("returns body unchanged when id is missing", () => {
+    const body = "{{citeNeeded:aaaa1111::r}}";
+    expect(replacePendingMarker(body, "missing0", "X")).toBe(body);
+  });
+});
+
+describe("stripAllPendingMarkers", () => {
+  it("strips pending markers and leaves resolved citations intact", () => {
+    const body =
+      "Before {{citeNeeded:aaaa1111::r}} mid {{cite:p1::direct::S. 1}} end";
+    expect(stripAllPendingMarkers(body)).toBe(
+      "Before  mid {{cite:p1::direct::S. 1}} end"
+    );
+  });
+
+  it("is a no-op when there are no pending markers", () => {
+    const body = "Plain {{cite:p1::direct::S. 1}}";
+    expect(stripAllPendingMarkers(body)).toBe(body);
+  });
+});
+
+// ── generatePlaceholderId / encode / decode / buildPendingMarker ────
+
+describe("generatePlaceholderId", () => {
+  it("returns 8-char lowercase alphanumeric ids", () => {
+    for (let i = 0; i < 5; i++) {
+      const id = generatePlaceholderId();
+      expect(id).toMatch(/^[a-z0-9]{8}$/);
+    }
+  });
+
+  it("produces distinct ids across rapid calls", () => {
+    const ids = new Set(
+      Array.from({ length: 100 }, () => generatePlaceholderId())
+    );
+    // Allow a single collision in 100 draws — extraordinarily unlikely with
+    // a 48-bit source, but keeps the test from flaking on the cosmic case.
+    expect(ids.size).toBeGreaterThanOrEqual(99);
+  });
+});
+
+describe("encodeReason / decodeReason", () => {
+  it("round-trips German umlauts and spaces", () => {
+    const raw = "Empirische Aussage über Müller und Schäfer";
+    expect(decodeReason(encodeReason(raw))).toBe(raw);
+  });
+
+  it("round-trips reserved characters that would break the marker", () => {
+    const raw = "Reason with :: and }} and { plus % sign";
+    const encoded = encodeReason(raw);
+    expect(encoded).not.toContain(":");
+    expect(encoded).not.toContain("}");
+    expect(decodeReason(encoded)).toBe(raw);
+  });
+
+  it("caps encoded length at 240 characters", () => {
+    const raw = "x".repeat(1000);
+    const encoded = encodeReason(raw);
+    expect(encoded.length).toBeLessThanOrEqual(240);
+  });
+});
+
+describe("buildPendingMarker", () => {
+  it("builds a marker that round-trips through parsePendingCitations", () => {
+    const marker = buildPendingMarker("abc12345", "Why does this need a cite?");
+    const result = parsePendingCitations(`prefix ${marker} suffix`);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("abc12345");
+    expect(result[0].reason).toBe("Why does this need a cite?");
   });
 });
 

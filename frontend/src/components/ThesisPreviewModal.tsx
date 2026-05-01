@@ -10,11 +10,12 @@ import {
 } from "@/components/ui/sheet";
 import { Loader2, Settings, Sparkles } from "lucide-react";
 import { compileDocument, DEFAULT_LAYOUT, DEFAULT_CITATION } from "@/lib/documentCompiler";
-import type { FigureDoc, PaperDoc, LayoutSettings, CitationSettings } from "@/lib/documentCompiler";
+import type { FigureDoc, PaperDoc, LayoutSettings, CitationSettings, CompiledSection } from "@/lib/documentCompiler";
 import type { AiPromptSettingsByLang } from "@/lib/types";
 import { useLanguage } from "@/lib/LanguageContext";
 import LayoutSettingsPanel from "./LayoutSettingsPanel";
 import AiPromptsSettingsPanel from "./AiPromptsSettingsPanel";
+import ChapterPages from "./ChapterPages";
 import { useBaselinePrompts } from "@/hooks/useBaselinePrompts";
 import "@/styles/hka-preview.css";
 import "katex/dist/katex.min.css";
@@ -171,12 +172,19 @@ export default function ThesisPreviewModal({
     });
   }, [data]);
 
-  /// Scrolls the preview to a section by its order number.
+  /// Scrolls the preview to a section by its order number. The first match
+  /// is preferred, but matches inside the offscreen `.hka-page--measure`
+  /// host are skipped so navigation lands on the visible card.
   const scrollToSection = (orderNumber: string) => {
-    const el = contentRef.current?.querySelector(
+    const matches = contentRef.current?.querySelectorAll(
       `[data-section="${orderNumber}"]`
     );
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!matches) return;
+    for (const el of Array.from(matches)) {
+      if (el.closest(".hka-page--measure")) continue;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
   };
 
   /// Title page info fields — mirrors the DOCX builder's info_fields list.
@@ -225,6 +233,42 @@ export default function ThesisPreviewModal({
   const startPage = layout.pageNumbering.startPage;
   let romanCounter = startPage;
   let arabicCounter = startPage;
+
+  /// Group main sections by top-level chapter for the paginator. Each group
+  /// becomes one or more visual A4 cards via the ChapterPages component.
+  const chapterGroups = useMemo<CompiledSection[][]>(() => {
+    if (!compiled) return [];
+    const groups: CompiledSection[][] = [];
+    for (const section of compiled.mainSections) {
+      if (section.depth === minDepth) {
+        groups.push([section]);
+      } else if (groups.length > 0) {
+        groups[groups.length - 1].push(section);
+      }
+    }
+    return groups;
+  }, [compiled, minDepth]);
+
+  /// Resolved visual page count per chapter group (from the paginator).
+  /// Defaults to 1 so initial page-number math stays sensible while the
+  /// measurer runs. Reset whenever the chapter list changes.
+  const [chapterPageCounts, setChapterPageCounts] = useState<number[]>([]);
+  useEffect(() => {
+    setChapterPageCounts(chapterGroups.map(() => 1));
+  }, [chapterGroups]);
+
+  /// Stable callback factory that updates the count for a single chapter.
+  const handleChapterPageCount = useCallback(
+    (idx: number) => (count: number) => {
+      setChapterPageCounts((prev) => {
+        if (prev[idx] === count) return prev;
+        const next = prev.slice();
+        next[idx] = count;
+        return next;
+      });
+    },
+    []
+  );
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -423,57 +467,27 @@ export default function ThesisPreviewModal({
               )}
 
               {/* ── Main content pages (arabic page numbers) ──────── */}
-              {/* Group sections by top-level chapter: each section at the minimum
-                  depth starts a new page card, deeper sections flow inside it. */}
-              {(() => {
-                const chapterGroups: (typeof compiled.mainSections)[] = [];
-                for (const section of compiled.mainSections) {
-                  if (section.depth === minDepth) {
-                    chapterGroups.push([section]);
-                  } else if (chapterGroups.length > 0) {
-                    chapterGroups[chapterGroups.length - 1].push(section);
-                  }
-                }
-                return chapterGroups.map((group) => {
-                  const pageNum = arabicCounter++;
-                  return (
-                    <div key={group[0].sectionId} className="hka-page">
-                      <div className="hka-page-number">{formatPageNum(pageNum, layout.pageNumbering.format, "main")}</div>
-                      <div className="hka-preview">
-                        {group.map((section) => {
-                          const HeadingTag = `h${Math.min(section.depth - minDepth + 1, 4)}` as keyof JSX.IntrinsicElements;
-                          return (
-                            <div key={section.sectionId} data-section={section.orderNumber}>
-                              <HeadingTag>
-                                {section.orderNumber} {section.title}
-                              </HeadingTag>
-                              {section.renderedBody && (
-                                <div
-                                  className="section-body"
-                                  dangerouslySetInnerHTML={{ __html: section.renderedBody }}
-                                />
-                              )}
-                              {/* Footnotes only shown for HKA Kürzel style */}
-                              {compiled.citationSettings.style === "hkaFootnote" &&
-                                section.footnotes.length > 0 && (
-                                <div className="hka-footnotes">
-                                  <ol style={{ listStyle: "none", padding: 0 }}>
-                                    {section.footnotes.map((fn) => (
-                                      <li key={fn.number}>
-                                        <sup>{fn.number}</sup> {fn.text}
-                                      </li>
-                                    ))}
-                                  </ol>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
+              {/* Each top-level chapter renders via ChapterPages, which
+                  measures its content and emits one or more A4 cards so
+                  long chapters split across pages like the .docx export. */}
+              {chapterGroups.map((group, idx) => {
+                const startNum = arabicCounter;
+                arabicCounter += chapterPageCounts[idx] ?? 1;
+                return (
+                  <ChapterPages
+                    key={group[0].sectionId}
+                    group={group}
+                    minDepth={minDepth}
+                    citationStyle={compiled.citationSettings.style}
+                    startPageNum={startNum}
+                    formatPageNum={(n) =>
+                      formatPageNum(n, layout.pageNumbering.format, "main")
+                    }
+                    layout={layout}
+                    onPageCountResolved={handleChapterPageCount(idx)}
+                  />
+                );
+              })}
 
               {/* ── Literaturverzeichnis ───────────────────────────── */}
               {compiled.bibliography.length > 0 && (

@@ -139,6 +139,22 @@ export interface ParsedCitation {
   secondaryPageRef?: string;
 }
 
+/// One pending placeholder cached on `sectionContent.pendingCitations`.
+/// Created by the auto-cite detect phase; consumed by the validate phase to
+/// score candidate papers. Truth lives in the body's `{{citeNeeded:...}}`
+/// markers — this array is regenerated on each save.
+export interface PendingCitation {
+  id: string;
+  reason: string;
+  suggestedPaperIds: PaperId[];
+}
+
+/// Doc shape mirror for `sectionTodos` rows. Frontend code that only reads
+/// the row prefers `Doc<"sectionTodos">`; this alias exists for components
+/// that take a denormalized shape (e.g. tests, fixtures).
+export type SectionTodo = Doc<"sectionTodos">;
+export type SectionTodoId = Id<"sectionTodos">;
+
 /// A single footnote entry for display in the editor footnote panel.
 export interface FootnoteEntry {
   number: number;

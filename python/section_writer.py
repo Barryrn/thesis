@@ -472,3 +472,399 @@ def collect_allowed_pages_by_paper(payload: dict[str, Any]) -> dict[str, set[str
                 pages.add(str(p))
         out[m["paperId"]] = pages
     return out
+
+
+# ---------------------------------------------------------------------------
+# Auto-citation: detect phase
+# ---------------------------------------------------------------------------
+#
+# The detect phase scans an already-written section body and asks the model
+# to mark sentences that need citations. Each entry references one or more
+# *suggested* paperIds from the section's match list — the validate phase
+# downstream is responsible for actually scoring each candidate. We keep the
+# two phases separate so the user can review / dismiss placeholders before
+# spending tokens on validation.
+
+# Soft cap on how many detection results we accept from one call. Sections
+# with more than ~200 claims are pathological and almost certainly indicate
+# the model misread the prompt and emitted noise.
+_MAX_DETECT_ITEMS = 200
+
+# Soft cap on body length per LLM round-trip. Beyond this we paragraph-chunk
+# the body so each call stays inside a comfortable context window. Tuned for
+# Anthropic / OpenAI standard tier (≈10k tokens of body alone leaves room for
+# the corpus block).
+_DETECT_BODY_CHAR_BUDGET = 40_000
+
+# Allowed claim_type values. The model is told to use these exactly; anything
+# else is normalised to "general" so the frontend has a safe enum to switch on.
+_DETECT_CLAIM_TYPES = {"empirical", "theoretical", "data", "general"}
+
+
+def build_detect_messages(
+    payload: dict[str, Any], body: str
+) -> tuple[str, str]:
+    """Return ``(system, user)`` for a /detect-citations call.
+
+    The user prompt reuses ``_shared_context_block`` so the model sees the
+    same outline + papers + allowed_paper_ids it sees during /generate.
+    The draft body is added in its own ``<draft>`` block. The system prompt
+    asks for strict JSON so the response can be parsed without natural-
+    language heuristics.
+    """
+    lang = payload.get("resolvedLanguage") or "en"
+    lang_name = _LANG_NAMES.get(lang, "English")
+
+    system = (
+        "You are an academic citation auditor. Given a draft section of a "
+        "master's thesis and the curated corpus of papers it is allowed to "
+        "cite, your job is to identify each sentence in the draft that "
+        "would benefit from an academic citation and propose which mapped "
+        "papers could support it.\n\n"
+        "Walk the draft paragraph by paragraph. Mark a sentence ONLY when "
+        "it makes a verifiable claim:\n"
+        "  • empirical — a specific number, study result, or measurement\n"
+        "  • data — a dataset reference or quantitative observation\n"
+        "  • theoretical — a definition, framework, or established model\n"
+        "  • general — any other factual claim that needs grounding\n\n"
+        "Do NOT mark transitional sentences, summaries of your own argument, "
+        "definitions you have just introduced, or stylistic flourishes. "
+        "Skip sentences that already contain a {{cite:...}} marker.\n\n"
+        "You may ONLY suggest paperIds listed in <allowed_paper_ids>. "
+        "Suggest 1–3 paperIds per claim, ranked by which is most likely "
+        "to support that exact claim based on the supplied summary and "
+        "excerpts. If no paper plausibly supports the claim, omit it.\n\n"
+        f"Phrase the `reason` field in {lang_name}.\n\n"
+        "Output contract — return ONLY a single JSON object, no prose, no "
+        "code fences. Schema:\n"
+        '  {"items": [\n'
+        '    {"claim_sentence": "<exact sentence from the draft, verbatim>",\n'
+        '     "claim_type": "empirical" | "theoretical" | "data" | "general",\n'
+        '     "suggested_paper_ids": ["<paperId>", ...],\n'
+        '     "reason": "<one short sentence>"}\n'
+        '  ]}\n\n'
+        "The `claim_sentence` MUST be a verbatim substring of the draft so "
+        "the frontend can locate it exactly. Do not paraphrase, do not add "
+        "ellipses, do not strip whitespace. If a claim spans multiple "
+        "sentences, choose the one whose end is the natural insertion point "
+        "for the citation."
+    )
+
+    base_context = _shared_context_block(payload, guidance=None, answers=None)
+    user_lines = [base_context, "", "<draft>", body, "</draft>"]
+    return system, "\n".join(user_lines)
+
+
+def parse_detect_response(
+    raw: str, allowed_paper_ids: list[str]
+) -> dict[str, Any]:
+    """Parse a /detect-citations response into ``{"items": [...], "warnings": [...]}``.
+
+    Tolerates leading/trailing prose around the JSON object (the model
+    occasionally adds a "Here is the analysis:" preamble despite the
+    contract). Filters entries whose ``suggested_paper_ids`` are entirely
+    outside ``allowed_paper_ids``, drops entries with empty
+    ``claim_sentence``, normalises ``claim_type`` against the enum, and
+    caps the result at ``_MAX_DETECT_ITEMS``.
+    """
+    text = (raw or "").strip()
+    candidate = text
+    if "{" in text and "}" in text:
+        candidate = text[text.index("{"): text.rindex("}") + 1]
+
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        return {"items": [], "warnings": ["Model returned non-JSON response"]}
+
+    raw_items = data.get("items") or []
+    if not isinstance(raw_items, list):
+        return {"items": [], "warnings": ["`items` was not a list"]}
+
+    allowed = set(allowed_paper_ids)
+    items: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    dropped_unknown = 0
+    dropped_empty = 0
+
+    for entry in raw_items:
+        if not isinstance(entry, dict):
+            continue
+
+        claim = str(entry.get("claim_sentence") or "").strip()
+        if not claim:
+            dropped_empty += 1
+            continue
+
+        suggested = entry.get("suggested_paper_ids") or []
+        if not isinstance(suggested, list):
+            suggested = []
+        # Filter to allowed ids while preserving model order.
+        filtered: list[str] = []
+        for pid in suggested:
+            pid_str = str(pid)
+            if pid_str in allowed and pid_str not in filtered:
+                filtered.append(pid_str)
+        if not filtered:
+            dropped_unknown += 1
+            continue
+
+        claim_type = str(entry.get("claim_type") or "").strip().lower()
+        if claim_type not in _DETECT_CLAIM_TYPES:
+            claim_type = "general"
+
+        reason = str(entry.get("reason") or "").strip()
+
+        items.append({
+            "claim_sentence": claim,
+            "claim_type": claim_type,
+            "suggested_paper_ids": filtered,
+            "reason": reason,
+        })
+
+        if len(items) >= _MAX_DETECT_ITEMS:
+            break
+
+    if dropped_unknown:
+        warnings.append(
+            f"Dropped {dropped_unknown} entries whose suggested paperIds "
+            "were not in the section match list."
+        )
+    if dropped_empty:
+        warnings.append(
+            f"Dropped {dropped_empty} entries with empty claim_sentence."
+        )
+    if len(raw_items) > _MAX_DETECT_ITEMS:
+        warnings.append(
+            f"Capped result at {_MAX_DETECT_ITEMS} items "
+            f"(model returned {len(raw_items)})."
+        )
+
+    return {"items": items, "warnings": warnings}
+
+
+def chunk_body_for_detection(body: str) -> list[str]:
+    """Split ``body`` into paragraph-aligned chunks under the char budget.
+
+    Keeps paragraphs whole — splitting mid-paragraph would hurt the
+    model's ability to identify claim sentences. When a single paragraph
+    exceeds the budget on its own (rare in thesis prose), it is included
+    as its own chunk; the LLM call will fail loudly rather than silently
+    truncating evidence.
+    """
+    if len(body) <= _DETECT_BODY_CHAR_BUDGET:
+        return [body]
+
+    paragraphs = body.split("\n\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for p in paragraphs:
+        p_len = len(p) + 2  # account for the joining "\n\n"
+        if current_len + p_len > _DETECT_BODY_CHAR_BUDGET and current:
+            chunks.append("\n\n".join(current))
+            current = [p]
+            current_len = p_len
+        else:
+            current.append(p)
+            current_len += p_len
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Auto-citation: validate phase
+# ---------------------------------------------------------------------------
+#
+# The validate phase takes a list of placeholders the user has chosen to
+# resolve and scores each candidate paperId against the underlying claim.
+# The frontend then promotes high-confidence resolutions to real
+# {{cite:...}} markers and creates section TODOs for the rest.
+
+# Cap on items per LLM round-trip. Larger batches degrade ranking quality
+# because the model must hold many independent claims in working memory at
+# once. The endpoint chunks above this and merges results.
+_MAX_VALIDATE_ITEMS_PER_CALL = 25
+
+# Score floor for clamping out unparseable / negative scores. Anything lower
+# is treated as 0; the frontend's ≥0.75 threshold then trivially rejects them.
+_MIN_VALIDATE_SCORE = 0.0
+_MAX_VALIDATE_SCORE = 1.0
+
+
+def build_validate_messages(
+    payload: dict[str, Any],
+    items: list[dict[str, Any]],
+) -> tuple[str, str]:
+    """Return ``(system, user)`` for a /validate-citations call.
+
+    Each item supplies ``placeholder_id``, ``claim_sentence``, and
+    ``candidate_paper_ids``. The model is asked to score every candidate
+    using the supplied excerpts and pick a page reference verbatim from
+    the excerpts (so the result clamps cleanly against
+    ``collect_allowed_pages_by_paper``).
+    """
+    lang = payload.get("resolvedLanguage") or "en"
+    lang_name = _LANG_NAMES.get(lang, "English")
+
+    system = (
+        "You are an academic citation validator. For each claim sentence "
+        "you receive, you will be given one or more candidate paperIds "
+        "from a curated corpus. Score how strongly each candidate paper "
+        "actually supports the claim, using the supplied summary and "
+        "excerpts as the only source of truth.\n\n"
+        "Scoring rubric (return a number in [0,1]):\n"
+        "  ≥ 0.85 — an excerpt directly states the claim or its core fact\n"
+        "  0.65–0.84 — the paper covers the topic and the summary or "
+        "an excerpt clearly implies the claim\n"
+        "  0.40–0.64 — the paper is topically adjacent but does not "
+        "establish the claim\n"
+        "  < 0.40 — wrong topic, wrong methodology, or no support\n\n"
+        "For ``page_ref_from_excerpt`` use the page number of the excerpt "
+        "you relied on, formatted as it appears in the excerpt (e.g. "
+        "\"S. 14\" or \"p. 42\"). If no excerpt has a page number, return "
+        "\"S. ?\". Never invent page numbers.\n\n"
+        f"Phrase the `justification` field in {lang_name}, one short "
+        "sentence per candidate.\n\n"
+        "Output contract — return ONLY a single JSON object, no prose, no "
+        "code fences. Schema:\n"
+        '  {"results": [\n'
+        '    {"placeholder_id": "<id>",\n'
+        '     "candidates": [\n'
+        '       {"paper_id": "<paperId>",\n'
+        '        "score": 0.82,\n'
+        '        "page_ref_from_excerpt": "S. 14",\n'
+        '        "justification": "<one short sentence>"}\n'
+        '     ]}\n'
+        '  ]}\n\n'
+        "Return one entry per input placeholder, even when no candidate "
+        "scores above the floor — let the consumer filter."
+    )
+
+    context = _shared_context_block(payload, guidance=None, answers=None)
+    items_block_lines: list[str] = ["<placeholders>"]
+    for item in items:
+        pid = item.get("placeholder_id", "")
+        claim = item.get("claim_sentence", "")
+        cands = item.get("candidate_paper_ids") or []
+        items_block_lines.append(f"- placeholder_id: {pid}")
+        items_block_lines.append(f"  claim_sentence: {claim}")
+        items_block_lines.append(
+            "  candidates: " + (", ".join(cands) if cands else "(none)")
+        )
+    items_block_lines.append("</placeholders>")
+
+    user = "\n".join([context, "", "\n".join(items_block_lines)])
+    return system, user
+
+
+def parse_validate_response(
+    raw: str,
+    allowed_paper_ids: list[str],
+    allowed_pages_by_paper: dict[str, set[str]] | None = None,
+) -> dict[str, Any]:
+    """Parse a /validate-citations response into ``{"results": [...]}``.
+
+    Drops candidates whose ``paper_id`` isn't in ``allowed_paper_ids``,
+    clamps ``score`` to [0,1], and clamps ``page_ref_from_excerpt`` to
+    the per-paper allowed set when provided. Out-of-set page refs are
+    forced to ``"S. ?"`` rather than dropped — this matches the
+    permissive policy of ``validate_citation_markers``.
+    """
+    text = (raw or "").strip()
+    candidate = text
+    if "{" in text and "}" in text:
+        candidate = text[text.index("{"): text.rindex("}") + 1]
+
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        return {"results": []}
+
+    raw_results = data.get("results") or []
+    if not isinstance(raw_results, list):
+        return {"results": []}
+
+    allowed = set(allowed_paper_ids)
+    out: list[dict[str, Any]] = []
+
+    for entry in raw_results:
+        if not isinstance(entry, dict):
+            continue
+        pid = str(entry.get("placeholder_id") or "").strip()
+        if not pid:
+            continue
+        cands_raw = entry.get("candidates") or []
+        if not isinstance(cands_raw, list):
+            cands_raw = []
+
+        cands: list[dict[str, Any]] = []
+        for c in cands_raw:
+            if not isinstance(c, dict):
+                continue
+            paper_id = str(c.get("paper_id") or "").strip()
+            if paper_id not in allowed:
+                continue
+
+            try:
+                score = float(c.get("score", 0.0))
+            except (TypeError, ValueError):
+                score = 0.0
+            score = max(_MIN_VALIDATE_SCORE, min(_MAX_VALIDATE_SCORE, score))
+
+            page = str(c.get("page_ref_from_excerpt") or "").strip()
+            if allowed_pages_by_paper is not None:
+                pages = allowed_pages_by_paper.get(paper_id) or set()
+                if pages and page and not _page_ref_matches(page, pages):
+                    page = "S. ?"
+            if not page:
+                page = "S. ?"
+
+            justification = str(c.get("justification") or "").strip()
+
+            cands.append({
+                "paper_id": paper_id,
+                "score": score,
+                "page_ref_from_excerpt": page,
+                "justification": justification,
+            })
+
+        # Sort candidates highest-score-first so the frontend can simply
+        # promote `candidates[0]` when the score clears the threshold.
+        cands.sort(key=lambda c: c["score"], reverse=True)
+        out.append({"placeholder_id": pid, "candidates": cands})
+
+    return {"results": out}
+
+
+def _page_ref_matches(page: str, allowed_pages: set[str]) -> bool:
+    """Loose comparison between a page string and the allowed set.
+
+    Accepts exact match, substring match against any allowed page (so
+    "S. 14" matches "14"), and the placeholder forms ``?`` / ``S. ?``.
+    Lets the model use either the verbatim "S. 14" form from the
+    excerpt or the bare numeric page interchangeably.
+    """
+    if _looks_unverifiable(page):
+        return True
+    page_norm = page.strip()
+    page_digits = re.sub(r"[^\d-]", "", page_norm)
+    for ap in allowed_pages:
+        ap_norm = ap.strip()
+        if page_norm == ap_norm:
+            return True
+        ap_digits = re.sub(r"[^\d-]", "", ap_norm)
+        if page_digits and ap_digits and page_digits == ap_digits:
+            return True
+    return False
+
+
+def chunk_validate_items(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Split ``items`` into batches under ``_MAX_VALIDATE_ITEMS_PER_CALL``."""
+    if len(items) <= _MAX_VALIDATE_ITEMS_PER_CALL:
+        return [items]
+    return [
+        items[i : i + _MAX_VALIDATE_ITEMS_PER_CALL]
+        for i in range(0, len(items), _MAX_VALIDATE_ITEMS_PER_CALL)
+    ]

@@ -1,8 +1,23 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { cascadeAutoCitationTodos } from "./sectionTodos";
 
 /// Old citation marker format (pre-HKA): {{cite:paperId::Label}}
 const OLD_CITE_REGEX = /\{\{cite:([^:]+)::([^}]+)\}\}/g;
+
+/// Extracts placeholderIds from `{{citeNeeded:<id>::<reason>}}` markers in
+/// document order. Mirrors `extractPendingPlaceholderIds` from the frontend's
+/// citationUtils — kept inline here so the Convex bundle has no cross-package
+/// import.
+function extractPendingPlaceholderIds(body: string): string[] {
+  const re = /\{\{citeNeeded:([a-z0-9]+)::[^}]*\}\}/g;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    out.push(m[1]);
+  }
+  return out;
+}
 
 /// Returns the authored content for a section, or null if none exists yet.
 export const getSectionContent = query({
@@ -148,11 +163,25 @@ export const getGenerationContext = query({
 
 /// Upserts the authored body text and cited paper IDs for a section.
 /// Enforces a one-to-one relationship: patches existing doc or inserts new.
+///
+/// Also accepts an optional `pendingCitations` cache (one entry per
+/// `{{citeNeeded:...}}` placeholder currently in `body`) and runs the
+/// auto-citation TODO cascade in the same transaction so orphaned auto rows
+/// disappear atomically with the body update.
 export const saveSectionContent = mutation({
   args: {
     sectionId: v.id("outlineSections"),
     body: v.string(),
     citedPaperIds: v.array(v.id("papers")),
+    pendingCitations: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          reason: v.string(),
+          suggestedPaperIds: v.array(v.id("papers")),
+        })
+      )
+    ),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -162,21 +191,33 @@ export const saveSectionContent = mutation({
 
     const now = Date.now();
 
+    // Recompute the placeholder-id set from the body itself rather than
+    // trusting the optional cache: the cache is a UX hint, the body is truth.
+    const livePlaceholderIds = extractPendingPlaceholderIds(args.body);
+
+    let docId;
     if (existing) {
       await ctx.db.patch(existing._id, {
         body: args.body,
         citedPaperIds: args.citedPaperIds,
+        pendingCitations: args.pendingCitations ?? [],
         updatedAt: now,
       });
-      return existing._id;
+      docId = existing._id;
+    } else {
+      docId = await ctx.db.insert("sectionContent", {
+        sectionId: args.sectionId,
+        body: args.body,
+        citedPaperIds: args.citedPaperIds,
+        pendingCitations: args.pendingCitations ?? [],
+        updatedAt: now,
+      });
     }
 
-    return await ctx.db.insert("sectionContent", {
-      sectionId: args.sectionId,
-      body: args.body,
-      citedPaperIds: args.citedPaperIds,
-      updatedAt: now,
-    });
+    // Cascade auto-citation TODOs whose chips no longer exist in the body.
+    await cascadeAutoCitationTodos(ctx, args.sectionId, livePlaceholderIds);
+
+    return docId;
   },
 });
 

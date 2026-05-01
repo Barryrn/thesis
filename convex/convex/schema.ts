@@ -126,7 +126,44 @@ export default defineSchema({
         expand: v.optional(v.object({ prompt: v.optional(v.string()), extraContext: v.optional(v.string()) })),
       })),
     })),
+    /// Cached working set for the auto-citation feature. One entry per
+    /// `{{citeNeeded:<id>::<reason>}}` placeholder currently present in `body`.
+    /// Holds the AI's suggested candidate paperIds for each placeholder so the
+    /// validate phase can score them without a second detection round-trip.
+    /// Truth lives in `body`; this array is regenerated on each save.
+    pendingCitations: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          reason: v.string(),
+          suggestedPaperIds: v.array(v.id("papers")),
+        })
+      )
+    ),
   }).index("by_section", ["sectionId"]),
+
+  /// Per-section TODO list shown in a collapsible drawer below the editor.
+  /// Two sources: user-created free-text items and auto-citation entries
+  /// linked to a `{{citeNeeded:...}}` placeholder via `placeholderId`. When a
+  /// placeholder disappears from the section body, the cascade in
+  /// saveSectionContent deletes any auto-citation TODO whose `placeholderId`
+  /// is no longer present. User TODOs are never auto-deleted.
+  sectionTodos: defineTable({
+    sectionId: v.id("outlineSections"),
+    text: v.string(),
+    completed: v.boolean(),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+    /// Set only for `source === "auto-citation"` rows. Matches the id segment
+    /// of a `{{citeNeeded:<id>::...}}` marker in the section's body.
+    placeholderId: v.optional(v.string()),
+    source: v.union(
+      v.literal("user"),
+      v.literal("auto-citation")
+    ),
+  })
+    .index("by_section", ["sectionId"])
+    .index("by_section_placeholder", ["sectionId", "placeholderId"]),
 
   /// Bibliographic metadata for a paper, 1:1 extension of the papers table.
   /// Holds source-type-specific fields needed to generate HKA-formatted
