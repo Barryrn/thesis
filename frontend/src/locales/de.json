@@ -346,7 +346,9 @@
       "rerunCitations": "Zitate neu generieren",
       "running": "Läuft…",
       "error": "KI-Lauf fehlgeschlagen. Bitte erneut versuchen."
-    }
+    },
+    "expandCard": "Details einblenden",
+    "collapseCard": "Details ausblenden"
   },
 
   "outlineEditor": {
@@ -410,7 +412,29 @@
     "addToGroup": "Zur Gruppe hinzufügen",
     "noGroups": "Noch keine Gruppen",
     "pillAria": "In Gruppe {{name}}, klicken zum Verwalten",
-    "addPillAria": "Dieses Paper zu einer Gruppe hinzufügen"
+    "addPillAria": "Dieses Paper zu einer Gruppe hinzufügen",
+    "description": "Beschreibung",
+    "descriptionPlaceholder": "Beschreibe, welche Papers hierher gehören…",
+    "autoAssign": "Automatisch zuweisen mit KI",
+    "autoAssignHint": "Schlägt Mitgliedschaft vor, wenn Papers zusammengefasst werden.",
+    "editDescription": "Beschreibung bearbeiten",
+    "rerunSuggestions": "Vorschläge erneut ausführen",
+    "seeSuggestedPapers": "Vorgeschlagene Papers ansehen",
+    "suggestion": {
+      "accept": "Vorschlag annehmen",
+      "decline": "Vorschlag ablehnen",
+      "reason": "Warum diese Gruppe"
+    },
+    "suggestions": {
+      "pending": "{{count}} offen",
+      "reviewAll": "Alle Vorschläge prüfen",
+      "empty": "Keine offenen Vorschläge",
+      "title": "KI-Vorschläge",
+      "titleForGroup": "Vorschläge für \"{{name}}\"",
+      "running": "Papers werden bewertet… {{done}}/{{total}}",
+      "ready": "KI-Vorschläge bereit für \"{{name}}\"",
+      "failed": "Vorschlagslauf fehlgeschlagen"
+    }
   },
 
   "outlineTree": {
@@ -495,6 +519,27 @@
     "toolbarButton": "Generieren",
     "toolbarTitleEnabled": "Diesen Abschnitt mit KI auf Basis zugeordneter Auszüge entwerfen",
     "toolbarTitleDisabled": "Ordne diesem Abschnitt zuerst Paper zu"
+  },
+
+  "recommend": {
+    "title": "Paper empfehlen",
+    "toolbarButton": "Empfehlen",
+    "toolbarTitle": "Passende Paper für Zitationen in diesem Abschnitt finden",
+    "scopeLabel": "Durchsuchen",
+    "scope": {
+      "all": "Alle Paper in der Bibliothek",
+      "groups": "Bestimmte Gruppen",
+      "papers": "Ausgewählte Paper"
+    },
+    "noGroups": "Noch keine Gruppen angelegt.",
+    "noPapers": "Noch keine Paper in der Bibliothek.",
+    "runButton": "Empfehlung starten",
+    "running": "Paper werden bewertet…",
+    "lowContextBanner": "Empfehlungen basieren nur auf dem Titel — schreibe einen Entwurf oder Notizen für bessere Treffer.",
+    "empty": "Keine passenden Paper gefunden.",
+    "addToSection": "Zum Abschnitt hinzufügen",
+    "added": "Hinzugefügt",
+    "errorGeneric": "Empfehlung fehlgeschlagen."
   },
 
   "thesisPreviewFull": {

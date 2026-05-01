@@ -21,6 +21,11 @@ export type OutlineSection = Doc<"outlineSections">;
 export type Summary = Doc<"summaries">;
 export type PaperGroup = Doc<"paperGroups">;
 
+/// Pending/decided AI-proposed group membership. Mirrors the Convex
+/// paperGroupSuggestions table — see schema.ts for field semantics.
+export type PaperGroupSuggestion = Doc<"paperGroupSuggestions">;
+export type SuggestionId = Id<"paperGroupSuggestions">;
+
 export interface ParsedSection {
   title: string;
   orderNumber: string;
@@ -73,6 +78,7 @@ export interface SectionMatch {
   excerptCount: number;
   userNotes?: string;
   displayOrder?: number;
+  isExpanded?: boolean;
 }
 
 export interface ActiveSection {
@@ -225,6 +231,24 @@ export type AiPromptSettingsByLang = Partial<Record<Language, AiPromptSettings>>
 /// Per-section AI prompt overrides keyed by language.
 /// Each language has its own independent set of per-mode overrides.
 export type AiPromptOverridesByLang = Partial<Record<Language, AiPromptOverrides>>;
+
+/// One scored row returned by the smart paper recommender. Title/authors/year
+/// are denormalised by the Convex action so the sheet renders without further
+/// queries.
+export interface CitationRecommendation {
+  paperId: PaperId;
+  score: number;
+  reasoning: string;
+  title: string;
+  authors: string[];
+  year?: number;
+}
+
+/// Scope filter used when launching a recommendation run.
+export type RecommendScope =
+  | { type: "all" }
+  | { type: "groups"; groupIds: GroupId[] }
+  | { type: "papers"; paperIds: PaperId[] };
 
 /// Maps processingStep values to user-friendly labels shown during paper processing.
 export const PROCESSING_STEP_LABELS: Record<string, string> = {

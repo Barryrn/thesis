@@ -125,3 +125,12 @@ export const listSections = query({
     return await ctx.db.query("outlineSections").order("asc").collect();
   },
 });
+
+/// Single-section lookup. Used by the recommendations action so it can read
+/// title + notes without scanning the whole outline.
+export const getSectionById = query({
+  args: { sectionId: v.id("outlineSections") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.sectionId);
+  },
+});

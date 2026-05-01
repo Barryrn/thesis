@@ -52,6 +52,12 @@ export default function LibraryPaperCard({
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const deletePaper = useMutation(api.papers.deletePaper);
+  // Pending AI suggestions for this paper. Rendered as dashed pills in the
+  // pill row below. Per-card query keeps the LibraryPaperCard self-contained;
+  // can be batched into a library-wide query later if it shows up on profiling.
+  const suggestions = useQuery(api.groups.listSuggestionsForPaper, {
+    paperId: paper._id,
+  });
 
   const dragData = {
     type: "paper-card",
@@ -204,6 +210,7 @@ export default function LibraryPaperCard({
               paperId={paper._id}
               groups={groups}
               paperGroupIds={paperGroupIds}
+              suggestions={suggestions ?? []}
             />
           </div>
 

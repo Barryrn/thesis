@@ -80,6 +80,7 @@ export default defineSchema({
     matchedAt: v.number(),
     userNotes: v.optional(v.string()),
     displayOrder: v.optional(v.number()),
+    isExpanded: v.optional(v.boolean()),
   })
     .index("by_paper", ["paperId"])
     .index("by_section", ["sectionId"]),
@@ -271,6 +272,38 @@ export default defineSchema({
     name: v.string(),
     color: v.string(),
     createdAt: v.number(),
+    /// Natural-language criterion the AI matcher uses to decide which papers
+    /// belong here. When absent, auto-assign is effectively disabled.
+    description: v.optional(v.string()),
+    /// When true, summarized papers are scored against `description` and
+    /// matches above the confidence threshold are queued as suggestions.
+    autoAssign: v.optional(v.boolean()),
+    /// FNV-1a 32-bit hash of `description`. Stored so declined suggestions
+    /// can be re-proposed only when the description (and thus the hash)
+    /// changes — see paperGroupSuggestions.groupDescriptionHashAtSuggestion.
+    descriptionHash: v.optional(v.string()),
+    /// Live status of the AI matcher for this group. Used by the UI to show
+    /// a spinner + N/M progress on the group row while a backfill or rerun
+    /// is in flight, and a transient "failed" state when Python is unreachable.
+    suggestionRunStatus: v.optional(
+      v.union(
+        v.literal("idle"),
+        v.literal("running"),
+        v.literal("failed")
+      )
+    ),
+    /// Total papers being scored in the current run (set when status flips to
+    /// "running"). Cleared along with status when the run finishes.
+    suggestionRunTotal: v.optional(v.number()),
+    /// Papers scored so far in the current run. Incremented as the action
+    /// processes each chunk; resets to 0 when a new run starts.
+    suggestionRunProgress: v.optional(v.number()),
+    /// Epoch-ms timestamp the current run started; used by the UI to format
+    /// elapsed-time hints and to detect stuck runs.
+    suggestionRunStartedAt: v.optional(v.number()),
+    /// Surfaces the failure cause to the UI when status is "failed". Cleared
+    /// the next time the run is restarted.
+    suggestionRunError: v.optional(v.string()),
   }),
 
   /// Many-to-many join between papers and paperGroups.
@@ -282,4 +315,31 @@ export default defineSchema({
     .index("by_paper", ["paperId"])
     .index("by_group", ["groupId"])
     .index("by_paper_group", ["paperId", "groupId"]),
+
+  /// Pending / accepted / declined AI-proposed group memberships. A row is
+  /// created when the matcher returns a high-confidence pair; the user then
+  /// accepts (creating a real membership) or declines.
+  paperGroupSuggestions: defineTable({
+    paperId: v.id("papers"),
+    groupId: v.id("paperGroups"),
+    /// Model-reported 0–1 score. Only pairs ≥ 0.7 are written.
+    confidence: v.number(),
+    /// One-sentence rationale shown as a tooltip on the suggestion pill.
+    reason: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("declined")
+    ),
+    /// Snapshot of the group's descriptionHash at suggestion time.
+    /// Used to decide whether a declined pair becomes eligible for re-suggestion
+    /// (only when the group's current hash no longer matches this snapshot).
+    groupDescriptionHashAtSuggestion: v.string(),
+    createdAt: v.number(),
+    /// Set when status transitions away from "pending".
+    decidedAt: v.optional(v.number()),
+  })
+    .index("by_paper", ["paperId"])
+    .index("by_group", ["groupId"])
+    .index("by_paper_and_status", ["paperId", "status"]),
 });

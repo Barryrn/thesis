@@ -388,6 +388,21 @@ export const reorderMatches = mutation({
   },
 });
 
+/// Persists the per-match expand/collapse state of a paper card so the user's
+/// chosen layout survives reloads. Scoped per `paperSectionMatches` row, so
+/// a paper can be collapsed in one section and expanded in another.
+export const setMatchExpanded = mutation({
+  args: {
+    matchId: v.id("paperSectionMatches"),
+    isExpanded: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.matchId, {
+      isExpanded: args.isExpanded,
+    });
+  },
+});
+
 // ===== QUERIES =====
 
 export const getMatchesBySection = query({
@@ -418,6 +433,7 @@ export const getMatchesBySection = query({
           excerptCount: excerpts.length,
           userNotes: match.userNotes,
           displayOrder: match.displayOrder,
+          isExpanded: match.isExpanded,
         });
       }
     }

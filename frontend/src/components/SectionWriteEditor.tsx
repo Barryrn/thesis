@@ -2,12 +2,13 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2 } from "lucide-react";
+import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2, Compass } from "lucide-react";
 import CitationPicker from "./CitationPicker";
 import SectionPromptEditor from "./SectionPromptEditor";
 import FormulaPreviewPanel from "./FormulaPreviewPanel";
 import FigurePanel from "./FigurePanel";
 import GenerateSectionPopover from "./GenerateSectionPopover";
+import CitationRecommendSheet from "./CitationRecommendSheet";
 import {
   extractCitationIds,
   insertCitationMarker,
@@ -64,6 +65,8 @@ export default function SectionWriteEditor({
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   /// Open state for the AI section-writer popover (toolbar Generate button).
   const [generatePopoverOpen, setGeneratePopoverOpen] = useState(false);
+  /// Open state for the smart paper recommendation sheet.
+  const [recommendSheetOpen, setRecommendSheetOpen] = useState(false);
 
   // ── Local state ───────────────────────────────────────────────────────
   const [body, setBody] = useState("");
@@ -568,6 +571,21 @@ export default function SectionWriteEditor({
             {t("optimize.formula")}
           </button>
           {/*
+            "Recommend papers" — opens the smart-recommendation sheet.
+            Reads section title + body + notes and asks the LLM to score
+            every candidate paper for citation relevance. Always enabled:
+            the recommender falls back to title-only matching when the
+            user hasn't drafted anything yet, surfaced as a banner.
+          */}
+          <button
+            onClick={() => setRecommendSheetOpen(true)}
+            className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors flex items-center gap-1"
+            title={t("recommend.toolbarTitle")}
+          >
+            <Compass className="size-3" />
+            {t("recommend.toolbarButton")}
+          </button>
+          {/*
             "Generate section" — opens the AI section-writer popover.
             Disabled when the section has no mapped papers, since the
             writer is forbidden from citing papers outside the match
@@ -783,6 +801,18 @@ export default function SectionWriteEditor({
         hasMatches={matches.length > 0}
         onInsert={handleGeneratedInsert}
       />
+
+      {/* Smart paper recommendation sheet. Recommendations are transient —
+          the sheet calls api.matches.addMatch when the user clicks "Add",
+          which feeds the existing AI run. */}
+      {recommendSheetOpen && (
+        <CitationRecommendSheet
+          sectionId={sectionId}
+          provider={provider}
+          fallbackLanguage={language}
+          onClose={() => setRecommendSheetOpen(false)}
+        />
+      )}
     </div>
   );
 }

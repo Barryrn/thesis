@@ -3,7 +3,9 @@
 /// controls for creating, renaming, recolouring, and deleting groups.
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery, useConvex } from "convex/react";
+import { runGroupMatcher } from "@/lib/runGroupMatcher";
+import { toast } from "sonner";
 import { api } from "../../convex/_generated/api";
 import {
   ChevronDown,
@@ -12,9 +14,15 @@ import {
   Check,
   Pencil,
   Trash2,
+  Sparkles,
+  RefreshCw,
+  Loader2,
+  AlertCircle,
+  ListChecks,
 } from "lucide-react";
 import { GROUP_COLORS } from "@/lib/types";
 import type { PaperGroup, GroupId } from "@/lib/types";
+import SuggestionsReviewSheet from "./SuggestionsReviewSheet";
 
 interface GroupsSectionProps {
   /// All existing groups from Convex.
@@ -54,12 +62,15 @@ function ColorPalette({
   );
 }
 
-/// Inline form for creating a new group (name + colour picker).
+/// Inline form for creating a new group: name + description + auto-assign + colour.
 function CreateGroupForm({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation();
   const createGroup = useMutation(api.groups.createGroup);
+  const convex = useConvex();
   const [name, setName] = useState("");
-  const [color, setColor] = useState(GROUP_COLORS[0].value);
+  const [description, setDescription] = useState("");
+  const [autoAssign, setAutoAssign] = useState(false);
+  const [color, setColor] = useState<string>(GROUP_COLORS[0].value);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -71,8 +82,18 @@ function CreateGroupForm({ onDone }: { onDone: () => void }) {
     const trimmed = name.trim();
     if (!trimmed) return;
     try {
-      await createGroup({ name: trimmed, color });
+      const newGroupId = await createGroup({
+        name: trimmed,
+        color,
+        description: description.trim() || undefined,
+        autoAssign,
+      });
       onDone();
+      // Created with auto-assign already on → kick off the matcher so the
+      // user sees suggestions without a separate Re-run click.
+      if (autoAssign && description.trim().length > 0 && newGroupId) {
+        void runGroupMatcher(convex, newGroupId);
+      }
     } catch {
       // Name collision — keep form open so user can rename.
     }
@@ -87,6 +108,30 @@ function CreateGroupForm({ onDone }: { onDone: () => void }) {
         placeholder={t("groups.groupName")}
         className="w-full h-7 px-2 text-xs bg-muted/40 border border-border/50 rounded-md text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-amber/40"
       />
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder={t("groups.descriptionPlaceholder")}
+        rows={2}
+        className="w-full px-2 py-1.5 text-xs bg-muted/40 border border-border/50 rounded-md text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-amber/40 resize-none"
+      />
+      <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+        <input
+          type="checkbox"
+          checked={autoAssign}
+          onChange={(e) => setAutoAssign(e.target.checked)}
+          className="mt-0.5 accent-amber"
+        />
+        <span className="flex-1">
+          <span className="flex items-center gap-1 text-foreground/80">
+            <Sparkles className="size-3 text-amber" />
+            {t("groups.autoAssign")}
+          </span>
+          <span className="block text-[10px] text-muted-foreground/70">
+            {t("groups.autoAssignHint")}
+          </span>
+        </span>
+      </label>
       <ColorPalette selected={color} onSelect={setColor} />
       <div className="flex gap-1">
         <button
@@ -108,6 +153,88 @@ function CreateGroupForm({ onDone }: { onDone: () => void }) {
   );
 }
 
+/// Inline editor shown when the user picks "Edit description" from the menu.
+/// Lets them update the description text and toggle auto-assign in one place.
+function GroupSettingsEditor({
+  group,
+  onDone,
+}: {
+  group: PaperGroup;
+  onDone: () => void;
+}) {
+  const { t } = useTranslation();
+  const updateGroup = useMutation(api.groups.updateGroup);
+  const convex = useConvex();
+  const [description, setDescription] = useState(group.description ?? "");
+  const [autoAssign, setAutoAssign] = useState(group.autoAssign === true);
+
+  async function commit() {
+    const wasAuto = group.autoAssign === true;
+    const descChanged = description !== (group.description ?? "");
+    await updateGroup({
+      groupId: group._id,
+      description,
+      autoAssign,
+    });
+    onDone();
+
+    // Auto-trigger the matcher when the criterion changes meaningfully:
+    // toggle flipped on, OR description was edited while auto-assign is on.
+    // We fire-and-forget — runGroupMatcher manages its own progress UI via
+    // the suggestionRunStatus fields, so the user sees the spinner appear.
+    const flippedOn = !wasAuto && autoAssign;
+    const editedWhileAuto = wasAuto && autoAssign && descChanged;
+    if (autoAssign && description.trim().length > 0 && (flippedOn || editedWhileAuto)) {
+      void runGroupMatcher(convex, group._id);
+    }
+  }
+
+  return (
+    <div className="p-2 space-y-2 w-64">
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder={t("groups.descriptionPlaceholder")}
+        rows={3}
+        className="w-full px-2 py-1.5 text-xs bg-muted/40 border border-border/50 rounded-md text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-amber/40 resize-none"
+      />
+      <label className="flex items-start gap-2 text-xs cursor-pointer">
+        <input
+          type="checkbox"
+          checked={autoAssign}
+          onChange={(e) => setAutoAssign(e.target.checked)}
+          className="mt-0.5 accent-amber"
+        />
+        <span className="flex-1">
+          <span className="flex items-center gap-1 text-foreground/80">
+            <Sparkles className="size-3 text-amber" />
+            {t("groups.autoAssign")}
+          </span>
+          <span className="block text-[10px] text-muted-foreground/70">
+            {t("groups.autoAssignHint")}
+          </span>
+        </span>
+      </label>
+      <div className="flex gap-1">
+        <button
+          type="button"
+          onClick={commit}
+          className="flex-1 h-7 text-xs rounded-md bg-amber/15 text-amber hover:bg-amber/25 transition-colors"
+        >
+          {t("common.save")}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="px-3 h-7 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        >
+          {t("common.cancel")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /// Per-group row with colour dot, name, count badge, and a "..." context menu.
 function GroupRow({
   group,
@@ -123,13 +250,29 @@ function GroupRow({
   const { t } = useTranslation();
   const updateGroup = useMutation(api.groups.updateGroup);
   const deleteGroup = useMutation(api.groups.deleteGroup);
+  // The matcher runs in the browser (so it can reach the user's localhost
+  // Python service); useConvex gives us the client to drive Convex queries
+  // and mutations from the orchestrator.
+  const convex = useConvex();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [recoloring, setRecoloring] = useState(false);
+  const [editing, setEditing] = useState(false);
+  // Whether the per-group "See suggested papers" sheet is open. Kept
+  // separate from the main review sheet (header badge) so a user can have
+  // both contexts without clobbering.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [draftName, setDraftName] = useState(group.name);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Per-group pending count drives the menu entry's badge. Reactive — the
+  // number drops as the user accepts/declines from the sheet.
+  const groupPendingCount = useQuery(
+    api.groups.countPendingSuggestionsForGroup,
+    { groupId: group._id }
+  );
 
   // Close menu when clicking outside.
   useEffect(() => {
@@ -138,6 +281,7 @@ function GroupRow({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
         setRecoloring(false);
+        setEditing(false);
       }
     }
     document.addEventListener("mousedown", handler);
@@ -147,6 +291,25 @@ function GroupRow({
   useEffect(() => {
     if (renaming) renameInputRef.current?.focus();
   }, [renaming]);
+
+  // Toast when a suggestion run transitions from "running" to a terminal
+  // state. Tracks the prior status in a ref so the toast fires exactly once
+  // per run (not on every re-render that happens to see a "failed" status).
+  const prevStatusRef = useRef(group.suggestionRunStatus);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    const curr = group.suggestionRunStatus;
+    if (prev === "running" && curr !== "running") {
+      if (curr === "failed") {
+        toast.error(group.suggestionRunError ?? t("groups.suggestions.failed"));
+      } else {
+        // Idle (success) — confirm completion. The header badge already
+        // shows the new pending count, so we only need a light confirmation.
+        toast.success(t("groups.suggestions.ready", { name: group.name }));
+      }
+    }
+    prevStatusRef.current = curr;
+  }, [group.suggestionRunStatus, group.suggestionRunError, group.name, t]);
 
   async function commitRename() {
     const trimmed = draftName.trim();
@@ -195,7 +358,37 @@ function GroupRow({
           className="flex-1 min-w-0 h-5 px-1 text-xs bg-muted/40 border border-amber/30 rounded text-foreground focus:outline-none"
         />
       ) : (
-        <span className="flex-1 min-w-0 text-xs truncate">{group.name}</span>
+        <span className="flex-1 min-w-0 text-xs truncate flex items-center gap-1">
+          {group.name}
+          {/* Indicates the AI matcher is active for this group. */}
+          {group.autoAssign && (
+            <Sparkles className="size-3 text-amber shrink-0" />
+          )}
+        </span>
+      )}
+
+      {/* AI run state — shown only while a backfill / rerun is in flight,
+          or briefly when the last run failed. Progress shows N/M papers
+          scored so the user knows the matcher is alive. */}
+      {group.suggestionRunStatus === "running" && (
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber/15 text-amber shrink-0 flex items-center gap-1"
+          title={t("groups.suggestions.running", {
+            done: group.suggestionRunProgress ?? 0,
+            total: group.suggestionRunTotal ?? 0,
+          })}
+        >
+          <Loader2 className="size-2.5 animate-spin" />
+          {group.suggestionRunProgress ?? 0}/{group.suggestionRunTotal ?? 0}
+        </span>
+      )}
+      {group.suggestionRunStatus === "failed" && (
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/15 text-destructive shrink-0 flex items-center gap-1"
+          title={group.suggestionRunError ?? "Suggestion run failed"}
+        >
+          <AlertCircle className="size-2.5" />
+        </span>
       )}
 
       {/* Paper count badge */}
@@ -212,6 +405,7 @@ function GroupRow({
             e.stopPropagation();
             setMenuOpen((o) => !o);
             setRecoloring(false);
+            setEditing(false);
           }}
           className="opacity-0 group-hover/row:opacity-100 p-0.5 rounded hover:bg-muted/60 transition-all"
         >
@@ -219,7 +413,10 @@ function GroupRow({
         </button>
 
         {menuOpen && (
-          <div className="absolute right-0 top-6 z-50 min-w-[140px] rounded-md border border-border/50 bg-popover shadow-md text-xs overflow-hidden">
+          <div
+            className="absolute right-0 top-6 z-50 min-w-[140px] rounded-md border border-border/50 bg-popover shadow-md text-xs overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
             {recoloring ? (
               <div className="p-2">
                 <ColorPalette
@@ -231,6 +428,14 @@ function GroupRow({
                   }}
                 />
               </div>
+            ) : editing ? (
+              <GroupSettingsEditor
+                group={group}
+                onDone={() => {
+                  setEditing(false);
+                  setMenuOpen(false);
+                }}
+              />
             ) : (
               <>
                 <button
@@ -247,6 +452,16 @@ function GroupRow({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    setEditing(true);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors"
+                >
+                  <Sparkles className="size-3 text-amber" />
+                  {t("groups.editDescription")}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setRecoloring(true);
                   }}
                   className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors"
@@ -257,6 +472,40 @@ function GroupRow({
                   />
                   {t("groups.recolor")}
                 </button>
+                {group.autoAssign && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setMenuOpen(false);
+                      await runGroupMatcher(convex, group._id);
+                    }}
+                    className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors"
+                  >
+                    <RefreshCw className="size-3 text-muted-foreground" />
+                    {t("groups.rerunSuggestions")}
+                  </button>
+                )}
+                {/* See suggested papers — only meaningful when there's at
+                    least one pending suggestion for this group. Hidden when
+                    the count is zero so the menu doesn't grow needlessly. */}
+                {(groupPendingCount ?? 0) > 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen(false);
+                      setReviewOpen(true);
+                    }}
+                    className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors"
+                  >
+                    <ListChecks className="size-3 text-amber" />
+                    <span className="flex-1 text-left">
+                      {t("groups.seeSuggestedPapers")}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber/15 text-amber shrink-0">
+                      {groupPendingCount}
+                    </span>
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -272,6 +521,13 @@ function GroupRow({
           </div>
         )}
       </div>
+      {reviewOpen && (
+        <SuggestionsReviewSheet
+          groupId={group._id}
+          groupName={group.name}
+          onClose={() => setReviewOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -286,6 +542,8 @@ export default function GroupsSection({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const pendingCount = useQuery(api.groups.countPendingSuggestions);
 
   return (
     <div className="border-b border-border/50 pb-2 mb-1">
@@ -303,6 +561,16 @@ export default function GroupsSection({
             <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber inline-block" />
           )}
         </button>
+        {!collapsed && pendingCount !== undefined && pendingCount > 0 && (
+          <button
+            onClick={() => setReviewOpen(true)}
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber/15 text-amber hover:bg-amber/25 transition-colors flex items-center gap-1"
+            title={t("groups.suggestions.reviewAll")}
+          >
+            <Sparkles className="size-2.5" />
+            {t("groups.suggestions.pending", { count: pendingCount })}
+          </button>
+        )}
         {!collapsed && (
           <button
             onClick={() => setCreating((c) => !c)}
@@ -321,7 +589,7 @@ export default function GroupsSection({
           )}
           {groups.length === 0 && !creating ? (
             <p className="text-[11px] text-muted-foreground/50 px-2 py-1">
-              No groups yet
+              {t("groups.noGroups")}
             </p>
           ) : (
             groups.map((g) => (
@@ -337,6 +605,10 @@ export default function GroupsSection({
             ))
           )}
         </div>
+      )}
+
+      {reviewOpen && (
+        <SuggestionsReviewSheet onClose={() => setReviewOpen(false)} />
       )}
     </div>
   );

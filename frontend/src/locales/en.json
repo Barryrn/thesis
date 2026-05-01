@@ -346,7 +346,9 @@
       "rerunCitations": "Re-run citations",
       "running": "Running…",
       "error": "AI run failed. Please try again."
-    }
+    },
+    "expandCard": "Expand paper details",
+    "collapseCard": "Collapse paper details"
   },
 
   "outlineEditor": {
@@ -410,7 +412,29 @@
     "addToGroup": "Add to group",
     "noGroups": "No groups yet",
     "pillAria": "In group {{name}}, click to manage",
-    "addPillAria": "Add this paper to a group"
+    "addPillAria": "Add this paper to a group",
+    "description": "Description",
+    "descriptionPlaceholder": "Describe what kind of papers belong here…",
+    "autoAssign": "Auto-assign with AI",
+    "autoAssignHint": "Suggest membership when papers are summarized.",
+    "editDescription": "Edit description",
+    "rerunSuggestions": "Re-run suggestions",
+    "seeSuggestedPapers": "See suggested papers",
+    "suggestion": {
+      "accept": "Accept suggestion",
+      "decline": "Decline suggestion",
+      "reason": "Why this group"
+    },
+    "suggestions": {
+      "pending": "{{count}} pending",
+      "reviewAll": "Review all suggestions",
+      "empty": "No pending suggestions",
+      "title": "AI suggestions",
+      "titleForGroup": "Suggestions for \"{{name}}\"",
+      "running": "Scoring papers… {{done}}/{{total}}",
+      "ready": "AI suggestions ready for \"{{name}}\"",
+      "failed": "Suggestion run failed"
+    }
   },
 
   "outlineTree": {
@@ -495,6 +519,27 @@
     "toolbarButton": "Generate",
     "toolbarTitleEnabled": "Draft this section with AI using mapped excerpts",
     "toolbarTitleDisabled": "Map papers to this section first"
+  },
+
+  "recommend": {
+    "title": "Recommend papers",
+    "toolbarButton": "Recommend",
+    "toolbarTitle": "Find papers to cite for this section",
+    "scopeLabel": "Scan",
+    "scope": {
+      "all": "All papers in library",
+      "groups": "Specific groups",
+      "papers": "Selected papers"
+    },
+    "noGroups": "No groups defined yet.",
+    "noPapers": "No papers in your library yet.",
+    "runButton": "Run recommendation",
+    "running": "Scoring papers…",
+    "lowContextBanner": "Recommendations are based on the section title only — add a draft or notes for sharper matches.",
+    "empty": "No matching papers found.",
+    "addToSection": "Add to section",
+    "added": "Added",
+    "errorGeneric": "Recommendation failed."
   },
 
   "thesisPreviewFull": {

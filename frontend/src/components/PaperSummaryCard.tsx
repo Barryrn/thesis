@@ -1104,6 +1104,33 @@ export default function PaperSummaryCard({
   const updateUserNotesMutation = useMutation(api.matches.updateUserNotes);
   const removeMatchMutation = useMutation(api.matches.removeMatch);
   const updatePaperNotesMutation = useMutation(api.papers.updatePaperNotes);
+  const setMatchExpandedMutation = useMutation(api.matches.setMatchExpanded);
+
+  // Card-level expand/collapse. Persisted per `paperSectionMatches` row so a
+  // paper can be collapsed in one section and expanded in another. Treat
+  // `undefined` (no field yet on legacy rows) as collapsed — that's the new
+  // default and avoids a backfill migration.
+  const [isExpanded, setIsExpanded] = useState<boolean>(
+    match.isExpanded ?? false,
+  );
+
+  // Reconcile with server changes (e.g. another tab toggled the same match).
+  useEffect(() => {
+    setIsExpanded(match.isExpanded ?? false);
+  }, [match.isExpanded]);
+
+  // Optimistic toggle. We flip the UI immediately and fire the mutation
+  // fire-and-forget; on failure the next page load reconciles from the server.
+  const handleToggleExpanded = useCallback(
+    (next: boolean) => {
+      setIsExpanded(next);
+      void setMatchExpandedMutation({
+        matchId: match.matchId,
+        isExpanded: next,
+      });
+    },
+    [setMatchExpandedMutation, match.matchId],
+  );
 
   // Document notes state
   const [docNotesExpanded, setDocNotesExpanded] = useState(false);
@@ -1268,6 +1295,21 @@ export default function PaperSummaryCard({
 
   const excerptCount = excerpts?.length ?? 0;
 
+  // The header row is the click/keyboard target for both expand and collapse.
+  // Inner controls (drag handle, group pills, badge column with unlink +
+  // chevron) stopPropagation so they keep their own behavior without also
+  // toggling the card.
+  const handleHeaderToggle = () => {
+    handleToggleExpanded(!isExpanded);
+  };
+
+  const handleHeaderKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleToggleExpanded(!isExpanded);
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
@@ -1276,11 +1318,19 @@ export default function PaperSummaryCard({
         isDragging ? "opacity-40" : ""
       }`}
     >
-      {/* Header row */}
-      <div className="flex items-start gap-3">
+      {/* Header row — click or Enter/Space anywhere on it toggles expand. */}
+      <div
+        onClick={handleHeaderToggle}
+        onKeyDown={handleHeaderKeyDown}
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        className="flex items-start gap-3 cursor-pointer"
+      >
         <div
           {...attributes}
           {...listeners}
+          onClick={(e) => e.stopPropagation()}
           className="mt-1 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-amber transition-colors shrink-0"
         >
           <GripVertical className="size-4" />
@@ -1296,7 +1346,7 @@ export default function PaperSummaryCard({
           </p>
           {/* Always-visible group pills — addresses the "I cannot see which
               group a paper is in when it's in the middle panel" gap. */}
-          <div className="mt-1.5">
+          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
             <GroupPillRow
               paperId={match.paperId}
               groups={allGroups}
@@ -1305,20 +1355,41 @@ export default function PaperSummaryCard({
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
+        <div
+          className="flex flex-col items-end gap-1.5 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Badge variant="outline" className={`text-xs ${badge.className}`}>
             {t(badge.tKey)}
           </Badge>
           {match.isManualOverride && (
             <span className="text-[10px] text-amber-dim">{t("paperCard.manualBadge")}</span>
           )}
-          <button
-            onClick={handleUnlink}
-            className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all p-0.5"
-            title={t("paperCard.unlinkTooltip")}
-          >
-            <Unlink className="size-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleUnlink}
+              className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all p-0.5"
+              title={t("paperCard.unlinkTooltip")}
+            >
+              <Unlink className="size-3.5" />
+            </button>
+            {/* Card-level expand/collapse chevron — always visible as a
+                visual affordance. Rotates to indicate state. Header row also
+                handles the toggle, but the chevron acts as a second click
+                target that's slightly more discoverable. */}
+            <button
+              onClick={() => handleToggleExpanded(!isExpanded)}
+              className="text-muted-foreground/60 hover:text-amber transition-colors p-0.5"
+              title={isExpanded ? t("paperCard.collapseCard") : t("paperCard.expandCard")}
+              aria-label={isExpanded ? t("paperCard.collapseCard") : t("paperCard.expandCard")}
+            >
+              <ChevronDown
+                className={`size-4 transition-transform duration-200 ${
+                  isExpanded ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1363,40 +1434,44 @@ export default function PaperSummaryCard({
               </div>
             )}
 
-            <CollapsibleSection icon={HelpCircle} label={t("paperCard.researchQuestion")} defaultOpen>
-              <p className="text-sm text-foreground/80 leading-relaxed">
-                {summary.researchQuestion}
-              </p>
-            </CollapsibleSection>
+            {isExpanded && (
+              <>
+                <CollapsibleSection icon={HelpCircle} label={t("paperCard.researchQuestion")} defaultOpen>
+                  <p className="text-sm text-foreground/80 leading-relaxed">
+                    {summary.researchQuestion}
+                  </p>
+                </CollapsibleSection>
 
-            <CollapsibleSection icon={Lightbulb} label={t("paperCard.keyFindings")} defaultOpen>
-              <ul className="space-y-1">
-                {summary.keyFindings.map((finding, i) => (
-                  <li
-                    key={i}
-                    className="text-sm text-foreground/80 leading-relaxed flex gap-2"
-                  >
-                    <span className="text-amber/60 shrink-0 mt-0.5">-</span>
-                    <span>{finding}</span>
-                  </li>
-                ))}
-              </ul>
-            </CollapsibleSection>
+                <CollapsibleSection icon={Lightbulb} label={t("paperCard.keyFindings")} defaultOpen>
+                  <ul className="space-y-1">
+                    {summary.keyFindings.map((finding, i) => (
+                      <li
+                        key={i}
+                        className="text-sm text-foreground/80 leading-relaxed flex gap-2"
+                      >
+                        <span className="text-amber/60 shrink-0 mt-0.5">-</span>
+                        <span>{finding}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsibleSection>
 
-            <CollapsibleSection icon={FlaskConical} label={t("paperCard.methodology")}>
-              <p className="text-sm text-foreground/70 leading-relaxed">
-                {summary.methodology}
-              </p>
-            </CollapsibleSection>
+                <CollapsibleSection icon={FlaskConical} label={t("paperCard.methodology")}>
+                  <p className="text-sm text-foreground/70 leading-relaxed">
+                    {summary.methodology}
+                  </p>
+                </CollapsibleSection>
 
-            <CollapsibleSection icon={FileText} label={t("paperCard.fullSummary")}>
-              <p className="text-sm text-foreground/70 leading-relaxed border-l-2 border-amber/20 pl-3">
-                {summary.rawSummary}
-              </p>
-            </CollapsibleSection>
+                <CollapsibleSection icon={FileText} label={t("paperCard.fullSummary")}>
+                  <p className="text-sm text-foreground/70 leading-relaxed border-l-2 border-amber/20 pl-3">
+                    {summary.rawSummary}
+                  </p>
+                </CollapsibleSection>
+              </>
+            )}
 
             {/* Supporting excerpts */}
-            {excerpts && (
+            {isExpanded && excerpts && (
               <div className="border-t border-border/20 pt-3">
                 <button
                   onClick={() => setExcerptsExpanded(!excerptsExpanded)}
@@ -1491,6 +1566,10 @@ export default function PaperSummaryCard({
           </>
         )}
 
+        {/* All blocks below are hidden when the card is collapsed: the AI
+            run controls, section notes, document notes, and source details. */}
+        {isExpanded && (
+          <>
         {/* Manual AI run button — used when the paper was associated via a
             center-panel drag (which intentionally skips auto-AI). If a summary
             already exists, only citations/excerpts are regenerated for this
@@ -1606,6 +1685,8 @@ export default function PaperSummaryCard({
             <SourceEditForm paperId={match.paperId} />
           </div>
         </CollapsibleSection>
+          </>
+        )}
       </div>
     </div>
   );

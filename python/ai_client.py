@@ -40,6 +40,8 @@ PROVIDER_MODELS: dict[tuple[str, str], str] = {
     ("openai", "optimizer"): "gpt-4o",
     ("openai", "extractor"): "gpt-4o-mini",
     ("openai", "writer"): "gpt-4o",
+    # Auto-grouping is short structured JSON output — a small/fast model is plenty.
+    ("openai", "grouper"): "gpt-4o-mini",
     ("anthropic", "mapper"): "claude-sonnet-4-20250514",
     ("anthropic", "summarizer"): "claude-sonnet-4-20250514",
     ("anthropic", "optimizer"): "claude-sonnet-4-20250514",
@@ -47,6 +49,8 @@ PROVIDER_MODELS: dict[tuple[str, str], str] = {
     # Section-writer drafts long-form prose with citations — Sonnet 4.6
     # is the current best balance of academic quality, long context, and cost.
     ("anthropic", "writer"): "claude-sonnet-4-6",
+    # Same Haiku used by the extractor — JSON classification, low latency wins.
+    ("anthropic", "grouper"): "claude-haiku-4-5-20251001",
 }
 
 VALID_PROVIDERS = {"openai", "anthropic"}

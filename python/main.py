@@ -17,9 +17,11 @@ import ai_client
 import convex_client
 import docx_builder
 import extractor
+import grouper
 import identifier
 import mapper
 import optimizer
+import recommender
 import section_writer
 import summarizer
 import zotero_client
@@ -517,6 +519,115 @@ async def optimize_text(req: OptimizeRequest):
         logger.error(
             f"Optimize failed: {type(e).__name__}: {e}",
             extra={"step": "optimize", "status": "failed"},
+        )
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+class SuggestGroupsRequest(BaseModel):
+    """Request body for /suggest-groups.
+
+    The Convex action layer assembles ``papers`` and ``groups`` from the
+    database; this endpoint stays stateless and never queries Convex
+    directly, mirroring the philosophy of /clarify and /optimize.
+    """
+    papers: list[dict]
+    groups: list[dict]
+    provider: str = "anthropic"
+
+
+@app.post("/suggest-groups")
+async def suggest_groups(req: SuggestGroupsRequest):
+    """Score each paper against the supplied groups and return matches.
+
+    Returns ``{"suggestions": [{paperId, groupId, confidence, reason}, ...]}``
+    where every entry has confidence ≥ 0.7. The Convex action persists each
+    one as a ``paperGroupSuggestions`` row (subject to dedupe rules).
+    """
+    logger = get_logger()
+    logger.info(
+        f"Suggest-groups started: papers={len(req.papers)}, "
+        f"groups={len(req.groups)}, provider={req.provider}",
+        extra={"step": "auto_group", "status": "started"},
+    )
+    try:
+        suggestions: list[dict] = []
+        for paper in req.papers:
+            matches = await run_in_threadpool(
+                grouper.suggest_for_paper,
+                paper,
+                req.groups,
+                req.provider,
+            )
+            for m in matches:
+                suggestions.append(
+                    {
+                        "paperId": paper["paperId"],
+                        "groupId": m["groupId"],
+                        "confidence": m["confidence"],
+                        "reason": m["reason"],
+                    }
+                )
+        logger.info(
+            f"Suggest-groups completed: matches={len(suggestions)}",
+            extra={"step": "auto_group", "status": "completed"},
+        )
+        return {"suggestions": suggestions}
+    except Exception as e:
+        logger.error(
+            f"Suggest-groups failed: {type(e).__name__}: {e}",
+            extra={"step": "auto_group", "status": "failed"},
+        )
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+class RecommendPapersRequest(BaseModel):
+    """Request body for /recommend-papers.
+
+    The Convex action layer assembles the candidate list (filtered by scope
+    and with already-matched papers excluded) and calls this endpoint. The
+    endpoint stays stateless and never queries Convex directly.
+    """
+
+    inputText: dict
+    papers: list[dict]
+    language: str = "en"
+    provider: str = "anthropic"
+
+
+@app.post("/recommend-papers")
+async def recommend_papers(req: RecommendPapersRequest):
+    """Score every candidate paper for citation relevance to the section.
+
+    Returns ``{"recommendations": [...], "lowContext": bool}``. Each
+    recommendation has ``paperId``, ``score`` (0..1), and ``reasoning`` in
+    the requested language. Papers that fail to parse are silently dropped;
+    a fully-failed run returns an empty list so the UI can show "no matches"
+    rather than an error.
+    """
+    logger = get_logger()
+    logger.info(
+        f"Recommend-papers started: papers={len(req.papers)}, "
+        f"language={req.language}, provider={req.provider}",
+        extra={"step": "recommend_papers", "status": "started"},
+    )
+
+    try:
+        result = await recommender.recommend(
+            input_text=req.inputText,
+            papers=req.papers,
+            language=req.language,
+            provider=req.provider,
+        )
+        logger.info(
+            f"Recommend-papers completed: scored={len(result['recommendations'])}, "
+            f"lowContext={result['lowContext']}",
+            extra={"step": "recommend_papers", "status": "completed"},
+        )
+        return result
+    except Exception as e:
+        logger.error(
+            f"Recommend-papers failed: {type(e).__name__}: {e}",
+            extra={"step": "recommend_papers", "status": "failed"},
         )
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
