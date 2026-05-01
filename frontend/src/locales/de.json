@@ -339,7 +339,14 @@
     "loadingSource": "Quelle wird geladen...",
     "noSourceDetails": "Keine Quellendetails verfügbar.",
     "autoGenerate": "Automatisch aus Autoren + Jahr generieren",
-    "auto": "Auto"
+    "auto": "Auto",
+    "runAi": {
+      "runAnalysis": "KI-Analyse starten",
+      "runCitations": "Zitate generieren",
+      "rerunCitations": "Zitate neu generieren",
+      "running": "Läuft…",
+      "error": "KI-Lauf fehlgeschlagen. Bitte erneut versuchen."
+    }
   },
 
   "outlineEditor": {
@@ -401,7 +408,9 @@
     "rename": "Umbenennen",
     "recolor": "Farbe ändern",
     "addToGroup": "Zur Gruppe hinzufügen",
-    "noGroups": "Noch keine Gruppen"
+    "noGroups": "Noch keine Gruppen",
+    "pillAria": "In Gruppe {{name}}, klicken zum Verwalten",
+    "addPillAria": "Dieses Paper zu einer Gruppe hinzufügen"
   },
 
   "outlineTree": {

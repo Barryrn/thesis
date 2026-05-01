@@ -339,7 +339,14 @@
     "loadingSource": "Loading source...",
     "noSourceDetails": "No source details available.",
     "autoGenerate": "Auto-generate from authors + year",
-    "auto": "Auto"
+    "auto": "Auto",
+    "runAi": {
+      "runAnalysis": "Run AI analysis",
+      "runCitations": "Run citations",
+      "rerunCitations": "Re-run citations",
+      "running": "Running…",
+      "error": "AI run failed. Please try again."
+    }
   },
 
   "outlineEditor": {
@@ -401,7 +408,9 @@
     "rename": "Rename",
     "recolor": "Recolor",
     "addToGroup": "Add to group",
-    "noGroups": "No groups yet"
+    "noGroups": "No groups yet",
+    "pillAria": "In group {{name}}, click to manage",
+    "addPillAria": "Add this paper to a group"
   },
 
   "outlineTree": {

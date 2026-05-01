@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
@@ -27,6 +27,7 @@ import {
   BookOpen,
   Loader2,
   RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import type {
   SectionMatch,
@@ -34,9 +35,13 @@ import type {
   DragData,
   MatchExcerpt,
   SourceType,
+  PaperGroup,
+  GroupId,
 } from "@/lib/types";
+import GroupPillRow from "./GroupPillRow";
 import type { Id } from "../../convex/_generated/dataModel";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
+import { useProvider } from "@/lib/ProviderContext";
 
 interface PaperSummaryCardProps {
   match: SectionMatch;
@@ -1062,6 +1067,23 @@ export default function PaperSummaryCard({
     matchId: match.matchId,
   });
 
+  // Group membership for the always-visible pill row under the byline.
+  // `listGroups` is shared across every card on the screen and Convex
+  // dedupes identical query subscriptions, so the cost is one round-trip
+  // per panel, not per card.
+  const allGroups = (useQuery(api.groups.listGroups) ?? []) as PaperGroup[];
+  const memberGroups = useQuery(api.groups.getGroupsForPaper, {
+    paperId: match.paperId,
+  });
+  const paperGroupIds = useMemo<Set<GroupId>>(() => {
+    if (!memberGroups) return new Set();
+    return new Set(
+      memberGroups
+        .filter((g): g is NonNullable<typeof g> => g !== null)
+        .map((g) => g._id as GroupId),
+    );
+  }, [memberGroups]);
+
   const [excerptsExpanded, setExcerptsExpanded] = useState(false);
 
   // Add excerpt form state
@@ -1087,6 +1109,72 @@ export default function PaperSummaryCard({
   const [docNotesExpanded, setDocNotesExpanded] = useState(false);
   const [docNotesValue, setDocNotesValue] = useState(paper?.notes ?? "");
   const [docNotesDirty, setDocNotesDirty] = useState(false);
+
+  // Manual AI-run state. Used when the paper was associated via center-panel
+  // drag (which intentionally skips auto-AI), so the user can trigger
+  // processing on demand. If a summary already exists we only run citations
+  // for the current section; otherwise we run the full /process pipeline.
+  const { provider } = useProvider();
+  const allSections = useQuery(api.outline.listSections) ?? [];
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const runAi = useCallback(async () => {
+    if (!paper?.fileUrl && !paper?.manualContent) return;
+    setAiRunning(true);
+    setAiError(null);
+    const sectionsPayload = allSections.map((s) => ({
+      _id: s._id,
+      title: s.title,
+      orderNumber: s.orderNumber,
+      notes: s.notes,
+    }));
+    try {
+      // Branch: summary exists → /cite (citations only). Else → /process (full).
+      if (summary) {
+        const res = await fetch(`${PYTHON_SERVICE_URL}/cite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paperId: match.paperId,
+            fileUrl: paper.fileUrl || "",
+            sectionIds: [sectionId],
+            sections: sectionsPayload,
+            language: "en",
+            provider,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } else {
+        const res = await fetch(`${PYTHON_SERVICE_URL}/process`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paperId: match.paperId,
+            fileUrl: paper.fileUrl || "",
+            sections: sectionsPayload,
+            fileName: paper.fileName,
+            language: "en",
+            provider,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.error("[AI] Manual run failed:", err);
+      setAiError(t("paperCard.runAi.error"));
+    } finally {
+      setAiRunning(false);
+    }
+  }, [paper, summary, match.paperId, sectionId, allSections, provider, t]);
+
+  const aiButtonLabel = aiRunning
+    ? t("paperCard.runAi.running")
+    : !summary
+      ? t("paperCard.runAi.runAnalysis")
+      : (excerpts && excerpts.length > 0)
+        ? t("paperCard.runAi.rerunCitations")
+        : t("paperCard.runAi.runCitations");
 
   const dragData = {
     type: "paper-card",
@@ -1206,6 +1294,15 @@ export default function PaperSummaryCard({
             {formatAuthors(match.authors, t("paperCard.unknownAuthors"))}
             {match.year ? ` (${match.year})` : ""}
           </p>
+          {/* Always-visible group pills — addresses the "I cannot see which
+              group a paper is in when it's in the middle panel" gap. */}
+          <div className="mt-1.5">
+            <GroupPillRow
+              paperId={match.paperId}
+              groups={allGroups}
+              paperGroupIds={paperGroupIds}
+            />
+          </div>
         </div>
 
         <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -1393,6 +1490,30 @@ export default function PaperSummaryCard({
 
           </>
         )}
+
+        {/* Manual AI run button — used when the paper was associated via a
+            center-panel drag (which intentionally skips auto-AI). If a summary
+            already exists, only citations/excerpts are regenerated for this
+            section; otherwise the full /process pipeline runs. */}
+        <div className="border-t border-border/20 pt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={runAi}
+            disabled={aiRunning || (!paper?.fileUrl && !paper?.manualContent)}
+            className="gap-1.5"
+          >
+            {aiRunning ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="size-3.5" />
+            )}
+            <span>{aiButtonLabel}</span>
+          </Button>
+          {aiError && (
+            <p className="mt-1.5 text-[11px] text-destructive">{aiError}</p>
+          )}
+        </div>
 
         {/* Section Notes (per-paper per-section) — always visible for linked papers */}
         <div className="border-t border-border/20 pt-3">
