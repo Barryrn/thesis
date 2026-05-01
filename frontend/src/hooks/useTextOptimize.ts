@@ -16,7 +16,15 @@ import {
 import type { OptimizeMode } from "@/lib/types";
 
 /// Possible states for the optimize workflow.
-type OptimizeStatus = "idle" | "loading" | "preview" | "error";
+///
+/// `cancelled` is distinct from `error` so callers can show silent UX
+/// (no toast) when the user deliberately aborts via the Stop button.
+type OptimizeStatus =
+  | "idle"
+  | "loading"
+  | "preview"
+  | "error"
+  | "cancelled";
 
 export interface OptimizeState {
   status: OptimizeStatus;
@@ -174,7 +182,17 @@ export function useTextOptimize(
           optimizedText: restoredText,
         }));
       } catch (err: unknown) {
-        if ((err as Error).name === "AbortError") return;
+        if ((err as Error).name === "AbortError") {
+          // The user clicked Stop (or this controller was aborted by a
+          // newer request). Surface a silent `cancelled` state instead
+          // of an error so the UI can simply clear without a toast.
+          setState((prev) =>
+            prev.status === "loading"
+              ? { ...prev, status: "cancelled", error: null }
+              : prev,
+          );
+          return;
+        }
         setState((prev) => ({
           ...prev,
           status: "error",
@@ -184,6 +202,20 @@ export function useTextOptimize(
     },
     [body, language, provider, getCustomPrompt]
   );
+
+  /// Aborts an in-flight request and lands in the `cancelled` state.
+  /// Idempotent — safe to call when nothing is in flight.
+  const cancelOptimize = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setState((prev) =>
+      prev.status === "loading"
+        ? { ...prev, status: "cancelled", error: null }
+        : prev,
+    );
+  }, []);
 
   /// Accepts the optimized text, splicing it into the body at the original
   /// selection range. Returns the new full body string for the caller to apply.
@@ -201,5 +233,11 @@ export function useTextOptimize(
     setState(INITIAL_STATE);
   }, []);
 
-  return { state, requestOptimize, acceptOptimize, discardOptimize };
+  return {
+    state,
+    requestOptimize,
+    acceptOptimize,
+    discardOptimize,
+    cancelOptimize,
+  };
 }

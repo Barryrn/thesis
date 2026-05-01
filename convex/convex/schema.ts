@@ -14,7 +14,12 @@ export default defineSchema({
       v.literal("pending"),
       v.literal("processing"),
       v.literal("completed"),
-      v.literal("failed")
+      v.literal("failed"),
+      /// Set by `cancelPaperProcessing` when the user aborts the
+      /// pipeline mid-flight. The Python worker checks this status
+      /// between stages and exits cleanly when it sees it. Treated as
+      /// terminal — the row is normally deleted by the UI right after.
+      v.literal("cancelled")
     ),
     errorMessage: v.optional(v.string()),
     uploadedAt: v.number(),

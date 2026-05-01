@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "convex/react";
 import { toast } from "sonner";
 import { api } from "../../convex/_generated/api";
-import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2, Compass, MessageCircleQuestion, Eraser } from "lucide-react";
+import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2, Compass, MessageCircleQuestion, Eraser, Square } from "lucide-react";
 import CitationPicker from "./CitationPicker";
 import SectionPromptEditor from "./SectionPromptEditor";
 import FormulaPreviewPanel from "./FormulaPreviewPanel";
@@ -18,6 +18,7 @@ import {
   getAtTriggerContext,
   buildFootnotes,
   renderFootnoteText,
+  formatBibliographyEntry,
   parsePendingCitations,
   extractPendingPlaceholderIds,
   replacePendingMarker,
@@ -36,16 +37,30 @@ import {
   getSelectionRangeInRawText,
 } from "@/lib/contentEditableUtils";
 import { useTextOptimize } from "@/hooks/useTextOptimize";
+import {
+  openAIToastProgress,
+  type AIToastProgressHandle,
+} from "@/components/ai-progress";
 import { useBaselinePrompts } from "@/hooks/useBaselinePrompts";
 import { resolvePrompt } from "@/lib/promptResolver";
 import { useLanguage } from "@/lib/LanguageContext";
 import { useProvider } from "@/lib/ProviderContext";
 import type { ActiveSection, CitationType, OptimizeMode, AiPromptSettingsByLang, AiPromptOverridesByLang } from "@/lib/types";
 import "katex/dist/katex.min.css";
-import type { Doc } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 /// Debounce delay in ms before auto-saving content.
 const SAVE_DEBOUNCE_MS = 1500;
+
+/// Extracts the first integer it can find in a free-form page string. Used to
+/// reconcile citation `pageRef` ("p.1", "S. 12 f.", "12-15", "S.12ff.") with
+/// the structured `pageNumber` stored on excerpts ("12", "~3"). Returns null
+/// when no digits are present so callers can fall back to "show all" mode.
+function firstPageNumber(raw: string | undefined | null): number | null {
+  if (!raw) return null;
+  const match = /\d+/.exec(raw);
+  return match ? Number(match[0]) : null;
+}
 
 interface SectionWriteEditorProps {
   activeSection: ActiveSection;
@@ -114,7 +129,37 @@ export default function SectionWriteEditor({
     requestOptimize,
     acceptOptimize,
     discardOptimize,
+    cancelOptimize,
   } = useTextOptimize(body, language, provider, getCustomPrompt);
+
+  /// Holds the live Sonner toast handle while an optimize call is in
+  /// flight. The toast surfaces a Stop button so the user can abort the
+  /// AI call from anywhere on the page even after the selection toolbar
+  /// collapses on click.
+  const optimizeToastRef = useRef<AIToastProgressHandle | null>(null);
+
+  /// Open / dismiss the optimize toast in lockstep with hook status.
+  /// Effect runs whenever the status changes — `loading` opens the
+  /// toast, every other state dismisses it.
+  useEffect(() => {
+    if (optimizeState.status === "loading") {
+      // Ignore if a toast is already on screen for the current run.
+      if (optimizeToastRef.current) return;
+      optimizeToastRef.current = openAIToastProgress({
+        label: t("optimize.optimizingToast"),
+        stopLabel: t("optimize.stop"),
+        onStop: () => {
+          cancelOptimize();
+        },
+      });
+    } else {
+      optimizeToastRef.current?.dismiss();
+      optimizeToastRef.current = null;
+    }
+    // No cleanup return — dismissal is handled by the next status
+    // transition (idle / preview / error / cancelled). On unmount,
+    // sonner cleans up its own portal.
+  }, [optimizeState.status, t, cancelOptimize]);
 
   // Citation picker state
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -180,6 +225,49 @@ export default function SectionWriteEditor({
     () => buildFootnotes(body, sourceMap),
     [body, sourceMap]
   );
+
+  /// All excerpts for the papers cited in the current body, regardless of
+  /// which section those excerpts were originally collected under. Citations
+  /// reference papers, not paper-in-section pairs, so a section-scoped lookup
+  /// would hide the relevance-note explanation whenever the cited paper was
+  /// matched under a different section.
+  const sectionExcerpts =
+    useQuery(
+      api.matches.getExcerptsByPaperIds,
+      citedPaperIds.length > 0
+        ? { paperIds: citedPaperIds as Id<"papers">[] }
+        : "skip"
+    ) ?? [];
+
+  /// Map paperId → excerpts from this section, ordered by orderIndex. Drives
+  /// the per-footnote excerpt preview in the FUSSNOTEN panel.
+  const excerptsByPaper = useMemo(() => {
+    const map = new Map<string, typeof sectionExcerpts>();
+    for (const ex of sectionExcerpts) {
+      const list = map.get(ex.paperId) ?? [];
+      list.push(ex);
+      map.set(ex.paperId, list);
+    }
+    return map;
+  }, [sectionExcerpts]);
+
+  /// Unique sources cited in the current section, in first-citation order.
+  /// Drives the "Quellen in diesem Abschnitt" panel so the user can see, at a
+  /// glance, which paper each Kürzel in the footnote list refers to.
+  const citedSourcesInOrder = useMemo(() => {
+    const byPaperId = new Map<string, (typeof allSources)[number]>();
+    for (const s of allSources) byPaperId.set(s.paperId, s);
+    const seen = new Set<string>();
+    const out: Array<(typeof allSources)[number]> = [];
+    for (const fn of footnotes) {
+      if (seen.has(fn.paperId)) continue;
+      const src = byPaperId.get(fn.paperId);
+      if (!src) continue;
+      seen.add(fn.paperId);
+      out.push(src);
+    }
+    return out;
+  }, [footnotes, allSources]);
 
   /// Formula preview entries extracted from body text.
   const formulaEntries = useMemo(
@@ -655,7 +743,13 @@ export default function SectionWriteEditor({
   const handleAutoCiteDetect = useCallback(async () => {
     const result = await detect.run(body);
     if (!result) {
-      toast.error(detect.error ?? t("optimize.autoCiteDetectError"));
+      // User-initiated cancellation lands silently (no toast); only
+      // show the error toast for genuine failures. Read the synchronous
+      // ref via wasCancelled() — `status` lags by one render after
+      // `await run()` returns and would be unreliable here.
+      if (!detect.wasCancelled()) {
+        toast.error(detect.error ?? t("optimize.autoCiteDetectError"));
+      }
       return;
     }
     if (result.body === body) {
@@ -698,7 +792,9 @@ export default function SectionWriteEditor({
 
     const result = await validate.run(body, pendingForRun);
     if (!result) {
-      toast.error(validate.error ?? t("optimize.autoCiteDetectError"));
+      if (!validate.wasCancelled()) {
+        toast.error(validate.error ?? t("optimize.autoCiteDetectError"));
+      }
       return;
     }
 
@@ -918,6 +1014,21 @@ export default function SectionWriteEditor({
               : t("optimize.autoCite")}
           </button>
           {/*
+            Stop pill rendered only while detect is in flight. Aborts the
+            request via the hook's `cancel()` (silent → no error toast).
+          */}
+          {detect.status === "loading" && (
+            <button
+              onClick={() => detect.cancel()}
+              className="text-[11px] px-2 py-0.5 rounded-full text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1"
+              title={t("optimize.stopAutoCite")}
+              aria-label={t("optimize.stopAutoCite")}
+            >
+              <Square className="size-3 fill-current" />
+              {t("optimize.stop")}
+            </button>
+          )}
+          {/*
             "Validate & resolve" — phase B. Only shown when there is at
             least one pending placeholder; otherwise it would be a dead
             button. Auto-promotes high-confidence resolutions and creates
@@ -935,6 +1046,18 @@ export default function SectionWriteEditor({
                 <Check className="size-3" />
               )}
               {t("optimize.autoCiteValidate")} ({pendingCount})
+            </button>
+          )}
+          {/* Stop pill for the validate phase, mirroring the detect one. */}
+          {validate.status === "loading" && (
+            <button
+              onClick={() => validate.cancel()}
+              className="text-[11px] px-2 py-0.5 rounded-full text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1"
+              title={t("optimize.stopAutoCite")}
+              aria-label={t("optimize.stopAutoCite")}
+            >
+              <Square className="size-3 fill-current" />
+              {t("optimize.stop")}
             </button>
           )}
           {/*
@@ -1118,17 +1241,110 @@ export default function SectionWriteEditor({
           <span className="text-[11px] font-medium text-amber-dim uppercase tracking-wider">
             {t("sectionWriteEditor.footnotes")}
           </span>
-          <ol className="mt-2 space-y-1 list-none">
-            {footnotes.map((fn) => (
-              <li
-                key={fn.number}
-                className="text-sm text-foreground/80 leading-relaxed"
-              >
-                <sup className="text-amber/70 mr-1">{fn.number}</sup>
-                {renderFootnoteText(fn)}
-              </li>
-            ))}
+          <ol className="mt-2 space-y-3 list-none">
+            {footnotes.map((fn) => {
+              // Resolve the supporting excerpt(s) behind this footnote.
+              // Citation markers don't carry an excerptId today, so we match
+              // by paperId + page heuristically: prefer excerpt(s) whose
+              // pageNumber's first integer equals the citation's pageRef
+              // first integer; fall back to all excerpts from the cited paper
+              // when no page-level match exists. This gives the writer a
+              // visible anchor to the source quote without requiring a
+              // schema/marker change.
+              const allForPaper = excerptsByPaper.get(fn.paperId) ?? [];
+              const citedPage = firstPageNumber(fn.pageRef);
+              const exact =
+                citedPage !== null
+                  ? allForPaper.filter(
+                      (e) => firstPageNumber(e.pageNumber) === citedPage
+                    )
+                  : [];
+              const matched = exact.length > 0 ? exact : allForPaper;
+              return (
+                <li
+                  key={fn.number}
+                  className="text-sm text-foreground/80 leading-relaxed"
+                >
+                  <div>
+                    <sup className="text-amber/70 mr-1">{fn.number}</sup>
+                    {renderFootnoteText(fn)}
+                  </div>
+                  {matched.length > 0 && (
+                    <ul className="mt-1.5 ml-5 space-y-1.5 list-none border-l border-border/30 pl-3">
+                      {matched.map((ex) => (
+                        <li key={ex._id} className="text-xs">
+                          <div className="italic text-foreground/70">
+                            “{ex.excerptText}”
+                          </div>
+                          {ex.pageNumber && (
+                            <div className="mt-0.5 text-foreground/50">
+                              {ex.pageNumberApproximate ? "~" : ""}p. {ex.pageNumber}
+                              {exact.length === 0 && citedPage !== null && (
+                                <span className="ml-2 text-amber-dim/70">
+                                  ({t("sectionWriteEditor.excerptPageMismatch")})
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {ex.relevanceNote?.trim() && (
+                            <div className="mt-0.5 text-foreground/65">
+                              {ex.relevanceNote}
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
           </ol>
+        </div>
+      )}
+
+      {/* Sources panel — resolves each Kürzel cited in this section to its
+          paper (authors, year, title, source-type, full bibliography line) so
+          the writer doesn't have to cross-reference the bibliography page. */}
+      {citedSourcesInOrder.length > 0 && (
+        <div className="rounded-lg border border-border/30 p-4 bg-muted/10">
+          <span className="text-[11px] font-medium text-amber-dim uppercase tracking-wider">
+            {t("sectionWriteEditor.sectionSources")}
+          </span>
+          <ul className="mt-2 space-y-3 list-none">
+            {citedSourcesInOrder.map((source) => {
+              const yearStr = source.year ? `(${source.year})` : "(o.J.)";
+              const authorsLine =
+                source.authors.length > 0
+                  ? source.authors.join("; ")
+                  : "";
+              return (
+                <li
+                  key={source._id}
+                  className="text-sm text-foreground/80 leading-relaxed"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-amber/80">
+                      [{source.kuerzel}]
+                    </span>
+                    <span className="font-medium">
+                      {authorsLine} {yearStr}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wider text-foreground/50 px-1.5 py-0.5 rounded bg-muted/30">
+                      {t(`sourceTypes.${source.sourceType}`)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 italic">{source.title}</div>
+                  <div className="mt-1 text-xs text-foreground/60">
+                    {formatBibliographyEntry(source, {
+                      title: source.title,
+                      authors: source.authors,
+                      year: source.year,
+                    })}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
 

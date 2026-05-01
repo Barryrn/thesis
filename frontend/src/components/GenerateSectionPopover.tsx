@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Sparkles, X } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
+import { AISurfaceProgress } from "@/components/ai-progress";
 import {
   Sheet,
   SheetContent,
@@ -128,11 +129,16 @@ export default function GenerateSectionPopover({
                 />
               )}
 
-              {(state.status === "streaming" || state.status === "done") && (
+              {(state.status === "streaming" ||
+                state.status === "done" ||
+                state.status === "cancelled") && (
                 <StreamView
                   draft={state.draft}
                   warnings={state.warnings}
-                  status={state.status}
+                  // Treat a user-cancelled stream the same as `done`: keep
+                  // the partial draft on screen with Insert/Append/Replace
+                  // controls so the work isn't thrown away.
+                  status={state.status === "streaming" ? "streaming" : "done"}
                   hasExistingBody={hasExistingBody}
                   onInsertReplace={() => {
                     onInsert(state.draft);
@@ -296,24 +302,24 @@ function StreamView({
 
   return (
     <div className="flex flex-col gap-3 min-h-0">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {status === "streaming"
-            ? t("generateSection.drafting")
-            : t("generateSection.draft")}
-        </span>
-        {status === "streaming" && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            className="gap-1 text-xs"
-          >
-            <X className="size-3" />
-            {t("generateSection.cancel")}
-          </Button>
-        )}
-      </div>
+      {status === "streaming" ? (
+        // Shared progress strip — visually consistent with other AI/parsing
+        // affordances (Zotero import, paper processing). Stop button lives
+        // inside the strip; the dedicated cancel button is removed since it
+        // duplicates the same action.
+        <AISurfaceProgress
+          label={t("generateSection.drafting")}
+          detail={t("generateSection.waiting")}
+          onStop={onCancel}
+          stopLabel={t("generateSection.cancel")}
+        />
+      ) : (
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {t("generateSection.draft")}
+          </span>
+        </div>
+      )}
 
       <div className="flex-1 min-h-[200px] max-h-[55vh] overflow-y-auto rounded-md border border-border bg-muted/20 p-3 text-sm whitespace-pre-wrap leading-relaxed">
         {rendered.length > 0 ? rendered : (

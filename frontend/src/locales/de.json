@@ -435,7 +435,10 @@
       "ready": "KI-Vorschläge bereit für \"{{name}}\"",
       "failed": "Vorschlagslauf fehlgeschlagen",
       "stop": "Klicken zum Stoppen",
-      "stopped": "Vorschlagslauf für \"{{name}}\" gestoppt"
+      "stopped": "Vorschlagslauf für \"{{name}}\" gestoppt",
+      "acceptAll": "Alle annehmen",
+      "declineAll": "Alle ablehnen",
+      "countForPaper": "{{count}} Vorschläge"
     }
   },
 
@@ -502,7 +505,12 @@
     "autoCiteClearConfirm": "Alle offenen Zitations-Platzhalter aus diesem Abschnitt entfernen?",
     "autoCiteDetectError": "Auto-Zitate fehlgeschlagen. Bitte erneut versuchen.",
     "autoCiteDetectSummary": "{{count}} Platzhalter eingefügt",
-    "autoCiteUnmatched": "{{count}} Vorschläge konnten nicht im Text platziert werden"
+    "autoCiteUnmatched": "{{count}} Vorschläge konnten nicht im Text platziert werden",
+    "stop": "Stopp",
+    "stopOptimize": "Optimierung stoppen",
+    "optimizingToast": "Optimiere ausgewählten Text …",
+    "validating": "Zitate werden geprüft …",
+    "stopAutoCite": "Auto-Zitate stoppen"
   },
 
   "pendingChip": {
@@ -639,7 +647,9 @@
   },
 
   "sectionWriteEditor": {
-    "footnotes": "Fußnoten"
+    "footnotes": "Fußnoten",
+    "sectionSources": "Quellen in diesem Abschnitt",
+    "excerptPageMismatch": "kein Exzerpt auf dieser Seite — alle aus dieser Quelle"
   },
 
   "prompts": {

@@ -435,7 +435,10 @@
       "ready": "AI suggestions ready for \"{{name}}\"",
       "failed": "Suggestion run failed",
       "stop": "Click to stop",
-      "stopped": "Stopped suggestion run for \"{{name}}\""
+      "stopped": "Stopped suggestion run for \"{{name}}\"",
+      "acceptAll": "Accept all",
+      "declineAll": "Decline all",
+      "countForPaper": "{{count}} suggestions"
     }
   },
 
@@ -502,7 +505,12 @@
     "autoCiteClearConfirm": "Remove all unresolved citation placeholders from this section?",
     "autoCiteDetectError": "Auto-cite failed. Please try again.",
     "autoCiteDetectSummary": "{{count}} placeholders inserted",
-    "autoCiteUnmatched": "{{count}} suggestions could not be placed in the prose"
+    "autoCiteUnmatched": "{{count}} suggestions could not be placed in the prose",
+    "stop": "Stop",
+    "stopOptimize": "Stop optimization",
+    "optimizingToast": "Optimizing selected text…",
+    "validating": "Validating citations…",
+    "stopAutoCite": "Stop auto-cite"
   },
 
   "pendingChip": {
@@ -639,7 +647,9 @@
   },
 
   "sectionWriteEditor": {
-    "footnotes": "Footnotes"
+    "footnotes": "Footnotes",
+    "sectionSources": "Sources in this section",
+    "excerptPageMismatch": "no excerpt on this page — showing all from this source"
   },
 
   "prompts": {

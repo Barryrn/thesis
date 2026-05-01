@@ -11,7 +11,7 @@
 /// The hook does NOT save — the caller wires the returned body into the
 /// editor and calls its existing `flushSave` so the chip insertion lands
 /// on the same autosave path as user typing.
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
 import {
   buildPendingMarker,
@@ -22,7 +22,14 @@ import { findSentenceEnd } from "@/lib/sentenceMatch";
 import type { PendingCitation } from "@/lib/types";
 
 /// Hook state. `loading` blocks repeated clicks; `error` surfaces a toast.
-export type DetectStatus = "idle" | "loading" | "success" | "error";
+/// `cancelled` is distinct from `error` so a Stop click does not raise a
+/// "detect failed" toast.
+export type DetectStatus =
+  | "idle"
+  | "loading"
+  | "success"
+  | "error"
+  | "cancelled";
 
 /// What the detect endpoint returns per claim.
 interface DetectItem {
@@ -64,6 +71,14 @@ export interface UseDetectCitations {
   error: string | null;
   run: (body: string) => Promise<DetectRunResult | null>;
   reset: () => void;
+  /// Aborts any in-flight detect request and lands in the `cancelled`
+  /// state. No-op when nothing is running.
+  cancel: () => void;
+  /// Synchronous read of whether the most recent `run()` ended via
+  /// `cancel()`. Use this in handlers to skip error toasts after a
+  /// user-initiated abort — `status` lags one render so it can't be
+  /// trusted directly after `await run()`.
+  wasCancelled: () => boolean;
 }
 
 /// Builder for the hook. The state lives inside the hook so two editors
@@ -73,11 +88,33 @@ export function useDetectCitations(
 ): UseDetectCitations {
   const [status, setStatus] = useState<DetectStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  /// Live AbortController for any /detect-citations request in flight.
+  /// Reset to null between calls so `cancel()` is a no-op when idle.
+  const abortRef = useRef<AbortController | null>(null);
+  /// Synchronous flag flipped by `cancel()` and read by handlers right
+  /// after `await run()` to distinguish abort from genuine failure.
+  /// State updates are batched and lag a render — a ref does not.
+  const cancelledRef = useRef(false);
 
   const reset = useCallback(() => {
     setStatus("idle");
     setError(null);
   }, []);
+
+  const cancel = useCallback(() => {
+    if (abortRef.current) {
+      cancelledRef.current = true;
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    // Only flip to `cancelled` if we were actively running — otherwise
+    // we'd clobber a freshly-finished `success` state with a stale stop
+    // click that arrived a tick late.
+    setStatus((prev) => (prev === "loading" ? "cancelled" : prev));
+    setError(null);
+  }, []);
+
+  const wasCancelled = useCallback(() => cancelledRef.current, []);
 
   const run = useCallback(
     async (body: string): Promise<DetectRunResult | null> => {
@@ -94,11 +131,19 @@ export function useDetectCitations(
       }
       setStatus("loading");
       setError(null);
+      cancelledRef.current = false;
+
+      // A fresh run supersedes any in-flight one, mirroring the same
+      // pattern used by `useTextOptimize` and `useGenerateSection`.
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       try {
         const res = await fetch(`${PYTHON_SERVICE_URL}/detect-citations`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             sectionId: options.sectionId,
             body,
@@ -170,6 +215,13 @@ export function useDetectCitations(
           insertedCount: pendingCitations.length,
         };
       } catch (e) {
+        // User-initiated abort lands in the silent `cancelled` state so
+        // the section editor doesn't show a "detect failed" toast for a
+        // request that was deliberately stopped.
+        if (e instanceof DOMException && e.name === "AbortError") {
+          setStatus((prev) => (prev === "loading" ? "cancelled" : prev));
+          return null;
+        }
         const message = e instanceof Error ? e.message : String(e);
         setStatus("error");
         setError(message);
@@ -178,10 +230,14 @@ export function useDetectCitations(
           console.debug("[auto-cite] detect failed:", message);
         }
         return null;
+      } finally {
+        // Drop the controller reference once the request settles so a
+        // late `cancel()` doesn't try to abort an already-resolved fetch.
+        if (abortRef.current === controller) abortRef.current = null;
       }
     },
     [options.sectionId, options.provider]
   );
 
-  return { status, error, run, reset };
+  return { status, error, run, reset, cancel, wasCancelled };
 }

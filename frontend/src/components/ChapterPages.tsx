@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { paginate } from "@/lib/paginateChapter";
 import type { CompiledSection, CitationSettings, LayoutSettings } from "@/lib/documentCompiler";
 
@@ -30,6 +30,16 @@ function cmToPx(cm: number, refEl: HTMLElement): number {
   return cm * px;
 }
 
+/// One paginated page as rendered by this component: the section/body HTML
+/// for the page plus the footnote entries whose citation markers landed on
+/// it (in marker order). Footnotes are rendered as a separate block at the
+/// bottom of each page card so they sit beneath the citation that triggered
+/// them, not on the page after.
+interface PageData {
+  html: string;
+  footnotes: { number: number; text: string }[];
+}
+
 /// Renders one top-level chapter as one or more A4 page cards. Long chapters
 /// are split into multiple cards via measurement-based pagination so the
 /// preview matches the eventual .docx export.
@@ -43,22 +53,30 @@ export default function ChapterPages({
   onPageCountResolved,
 }: ChapterPagesProps) {
   const measureRef = useRef<HTMLDivElement>(null);
-  const [pages, setPages] = useState<string[] | null>(null);
+  const [pages, setPages] = useState<PageData[] | null>(null);
 
-  /// Build the chapter's full body HTML once. The same string is rendered
-  /// into the offscreen measurer and then sliced back out per visual page.
+  /// Lookup table: footnote number → footnote text. Used to materialize
+  /// per-page footnote blocks once the paginator has decided which numbers
+  /// belong on which page. We must look up by number because the paginator
+  /// only sees the markers, not the text.
+  const footnoteMap = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const s of group) {
+      for (const fn of s.footnotes) m.set(fn.number, fn.text);
+    }
+    return m;
+  }, [group]);
+
+  /// Build the chapter's full body HTML once. Body only — no footnote block
+  /// here, since footnotes are placed per visual page after pagination.
+  /// `data-fn-num` on each `<sup>` lets the paginator attribute markers to
+  /// pages without parsing their text content.
   const fullHtml = group
     .map((section) => {
       const headingLevel = Math.min(section.depth - minDepth + 1, 4);
-      const footnotesHtml =
-        citationStyle === "hkaFootnote" && section.footnotes.length > 0
-          ? `<div class="hka-footnotes"><ol style="list-style:none;padding:0;">${section.footnotes
-              .map((fn) => `<li><sup>${fn.number}</sup> ${fn.text}</li>`)
-              .join("")}</ol></div>`
-          : "";
       return `<div data-section="${section.orderNumber}"><h${headingLevel}>${section.orderNumber} ${section.title}</h${headingLevel}>${
         section.renderedBody ?? ""
-      }${footnotesHtml}</div>`;
+      }</div>`;
     })
     .join("");
 
@@ -96,21 +114,38 @@ export default function ChapterPages({
         if (!inner) throw new Error("measure host missing inner .hka-preview");
 
         const slices = paginate(inner, maxHeightPx);
-        const html = slices.map((nodes) => {
+        // Build per-page payload: HTML for the body nodes plus the
+        // footnotes whose citation markers landed on this page.
+        const showFootnotes = citationStyle === "hkaFootnote";
+        const built: PageData[] = slices.map((slice) => {
           const wrap = document.createElement("div");
-          for (const n of nodes) wrap.appendChild(n);
-          return wrap.innerHTML;
+          for (const n of slice.nodes) wrap.appendChild(n);
+          const footnotes = showFootnotes
+            ? slice.footnoteNumbers
+                .map((n) => ({ number: n, text: footnoteMap.get(n) ?? "" }))
+                .filter((fn) => fn.text.length > 0)
+            : [];
+          return { html: wrap.innerHTML, footnotes };
         });
 
         if (!cancelled) {
-          setPages(html);
-          onPageCountResolved(Math.max(html.length, 1));
+          setPages(built);
+          onPageCountResolved(Math.max(built.length, 1));
         }
       } catch (err) {
         // Fall back to a single tall card containing the whole chapter.
         debugPrintError(err);
         if (!cancelled) {
-          setPages([fullHtml]);
+          // Aggregate every footnote onto the fallback page so nothing is
+          // lost — we can't paginate, but we mustn't drop citations.
+          const allFootnotes =
+            citationStyle === "hkaFootnote"
+              ? Array.from(footnoteMap.entries()).map(([number, text]) => ({
+                  number,
+                  text,
+                }))
+              : [];
+          setPages([{ html: fullHtml, footnotes: allFootnotes }]);
           onPageCountResolved(1);
         }
       }
@@ -165,10 +200,26 @@ export default function ChapterPages({
       {/* Visible A4 page cards. While pages is null we render nothing
           (would flash a tall card otherwise). */}
       <div ref={visibleRef} style={{ display: "contents" }}>
-        {pages?.map((html, idx) => (
+        {pages?.map((page, idx) => (
           <div key={idx} className="hka-page">
             <div className="hka-page-number">{formatPageNum(startPageNum + idx)}</div>
-            <div className="hka-preview" dangerouslySetInnerHTML={{ __html: html }} />
+            <div className="hka-preview">
+              <div
+                className="hka-page-body"
+                dangerouslySetInnerHTML={{ __html: page.html }}
+              />
+              {page.footnotes.length > 0 && (
+                <div className="hka-footnotes">
+                  <ol style={{ listStyle: "none", padding: 0 }}>
+                    {page.footnotes.map((fn) => (
+                      <li key={fn.number}>
+                        <sup>{fn.number}</sup> {fn.text}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>

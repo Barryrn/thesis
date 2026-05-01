@@ -35,7 +35,8 @@ export const updatePaperStatus = mutation({
       v.literal("pending"),
       v.literal("processing"),
       v.literal("completed"),
-      v.literal("failed")
+      v.literal("failed"),
+      v.literal("cancelled")
     ),
     errorMessage: v.optional(v.string()),
   },
@@ -45,10 +46,36 @@ export const updatePaperStatus = mutation({
       patch.errorMessage = args.errorMessage;
     }
     // Clear processingStep when transitioning to a terminal state
-    if (args.status === "completed" || args.status === "failed") {
+    // (`cancelled` is terminal alongside `completed` and `failed`).
+    if (
+      args.status === "completed" ||
+      args.status === "failed" ||
+      args.status === "cancelled"
+    ) {
       patch.processingStep = undefined;
     }
     await ctx.db.patch(args.paperId, patch);
+  },
+});
+
+/// Marks a paper as `cancelled` so the Python pipeline aborts at the
+/// next between-stage status check. Idempotent: only flips status when
+/// the paper is in a cancellable state (`pending` or `processing`).
+/// Already-terminal states (`completed`, `failed`, `cancelled`) are
+/// no-ops so a stale Stop click can't undo a successful run.
+export const cancelPaperProcessing = mutation({
+  args: { paperId: v.id("papers") },
+  handler: async (ctx, args) => {
+    const paper = await ctx.db.get(args.paperId);
+    if (!paper) return { cancelled: false, reason: "not_found" as const };
+    if (paper.status !== "pending" && paper.status !== "processing") {
+      return { cancelled: false, reason: "not_cancellable" as const };
+    }
+    await ctx.db.patch(args.paperId, {
+      status: "cancelled",
+      processingStep: undefined,
+    });
+    return { cancelled: true, reason: null };
   },
 });
 

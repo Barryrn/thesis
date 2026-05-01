@@ -156,6 +156,26 @@
   border-top: 1px solid #999;
 }
 
+/* Anchor the per-page footnote block to the bottom of the page card.
+ * The visible card is a fixed-height A4; the offscreen measurer must stay
+ * in normal flow, so this only targets visible pages. `.hka-page-body`
+ * grows to fill remaining space, pushing `.hka-footnotes` to the bottom
+ * just above the page's bottom margin. */
+.hka-page:not(.hka-page--measure) .hka-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.hka-page:not(.hka-page--measure) .hka-page-body {
+  flex: 1 1 auto;
+}
+
+.hka-page:not(.hka-page--measure) .hka-footnotes {
+  flex: 0 0 auto;
+}
+
 .hka-footnotes li {
   margin-bottom: 0.2cm;
 }

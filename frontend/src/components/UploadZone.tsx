@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
+import { Square } from "lucide-react";
 import { useLanguage } from "@/lib/LanguageContext";
 import { useProvider } from "@/lib/ProviderContext";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
@@ -121,6 +122,7 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
   const generateUploadUrl = useMutation(api.papers.generateUploadUrl);
   const createPaper = useMutation(api.papers.createPaper);
   const updatePaperStatus = useMutation(api.papers.updatePaperStatus);
+  const cancelPaperProcessing = useMutation(api.papers.cancelPaperProcessing);
   const convexClient = useConvex();
   const { language } = useLanguage();
   const { provider } = useProvider();
@@ -486,6 +488,43 @@ export default function UploadZone({ zoteroCollection }: UploadZoneProps) {
                       {statusLabel}
                     </Badge>
                   )}
+                  {/* Cancel button — shown while either the local stage
+                      (queued/uploading/creating/triggering) or the live
+                      backend status (processing) signals an in-flight
+                      pipeline. Calls the cancelPaperProcessing mutation
+                      which flips the paper's status to `cancelled`; the
+                      Python worker checks between every stage and exits
+                      cleanly. Idempotent — Convex no-ops on terminal
+                      states so a stale click is safe. */}
+                  {entry.paperId &&
+                    (entry.status === "uploading" ||
+                      entry.status === "creating" ||
+                      entry.status === "triggering" ||
+                      entry.status === "queued" ||
+                      liveStatus === "processing") && (
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            await cancelPaperProcessing({
+                              paperId: entry.paperId!,
+                            });
+                            addLog("warn", `[${entry.file.name}] Cancelling…`);
+                          } catch (err) {
+                            addLog(
+                              "error",
+                              `[${entry.file.name}] Cancel failed: ${err instanceof Error ? err.message : String(err)}`,
+                            );
+                          }
+                        }}
+                        title={t("libraryCard.stopProcessing")}
+                        aria-label={t("libraryCard.stopProcessing")}
+                        className="text-destructive hover:bg-destructive/10 rounded-md p-1 transition-colors"
+                      >
+                        <Square className="size-3 fill-current" />
+                      </button>
+                    )}
                 </div>
               </div>
             );

@@ -5,6 +5,11 @@
 /// split across multiple cards while still letting the **trailing** card of
 /// a split section share its remaining budget with the next sibling — so
 /// e.g. section 1.5 begins underneath the tail of section 1.4.
+///
+/// Also tracks footnote citations per page: each `<sup class="footnote-ref"
+/// data-fn-num="N">` marker placed on a page reserves space for its
+/// corresponding footnote line at the bottom of that page, so the rendered
+/// footnotes always live on the same page as their citation marker.
 
 const ATOMIC_CLASSES = ["thesis-figure", "formula-display", "hka-footnotes"];
 const ATOMIC_TAGS = new Set(["FIGURE", "TABLE", "LI"]);
@@ -28,6 +33,13 @@ interface NodeBlock {
   /// Bottom relative to the parent's top (px).
   bottom: number;
   isElement: boolean;
+}
+
+/// One paginated page: the visible nodes plus the footnote numbers whose
+/// citation markers landed on this page (in marker-encounter order).
+export interface PaginatedPage {
+  nodes: Node[];
+  footnoteNumbers: number[];
 }
 
 function groupChildNodes(parent: Node, parentTop: number): NodeBlock[] {
@@ -117,6 +129,66 @@ function rangeHeight(blocks: NodeBlock[], startIdx: number, endIdx: number) {
   return blocks[endIdx].bottom - blocks[startIdx].top;
 }
 
+/// Collect the `data-fn-num` values from every `sup.footnote-ref` inside the
+/// given root node (or sub-tree of nodes). Returns numbers in document order.
+function collectFootnoteNums(nodes: Node[]): number[] {
+  const out: number[] = [];
+  for (const n of nodes) {
+    if (n.nodeType !== Node.ELEMENT_NODE) continue;
+    const root = n as Element;
+    // The block itself might be a sup (rare, but handle).
+    if (root.matches?.("sup.footnote-ref[data-fn-num]")) {
+      const v = Number(root.getAttribute("data-fn-num"));
+      if (Number.isFinite(v)) out.push(v);
+    }
+    const sups = root.querySelectorAll?.("sup.footnote-ref[data-fn-num]");
+    if (sups) {
+      sups.forEach((sup) => {
+        const v = Number(sup.getAttribute("data-fn-num"));
+        if (Number.isFinite(v)) out.push(v);
+      });
+    }
+  }
+  return out;
+}
+
+/// Measure once at pagination start: how tall is one footnote `<li>` line
+/// and how much fixed overhead does the `.hka-footnotes` block itself add
+/// (margin-top + padding-top + border-top). We append a probe to the same
+/// container that holds the offscreen measurer so it inherits typography.
+function measureFootnoteMetrics(measureEl: HTMLElement): {
+  linePx: number;
+  blockOverheadPx: number;
+} {
+  const probe = document.createElement("div");
+  probe.className = "hka-footnotes";
+  probe.style.position = "absolute";
+  probe.style.left = "-9999px";
+  probe.style.top = "0";
+  probe.style.visibility = "hidden";
+  probe.innerHTML =
+    '<ol style="list-style:none;padding:0;margin:0;"><li><sup>1</sup> probe</li></ol>';
+  // Insert as a sibling of the measurer's parent card so it picks up the
+  // same width/typography context. Falls back to body if no parent.
+  const host = measureEl.parentElement ?? document.body;
+  host.appendChild(probe);
+
+  const blockRect = probe.getBoundingClientRect();
+  const li = probe.querySelector("li") as HTMLElement | null;
+  const liRect = li?.getBoundingClientRect();
+
+  // Line height = the probed <li> height; safe lower bound is its bounding
+  // box height. If <li> not found, fall back to ~14px.
+  const linePx = liRect ? liRect.height : 14;
+  // Block overhead = total height − one line. Captures margin-top (1cm),
+  // padding-top (0.5cm), and the 1px top border. We measure rather than
+  // hardcode so future CSS tweaks don't drift.
+  const blockOverheadPx = Math.max(blockRect.height - linePx, 0);
+
+  host.removeChild(probe);
+  return { linePx, blockOverheadPx };
+}
+
 /// Greedy single-pass paginator.
 ///
 /// Pages are built up as `Node[][]`. The packer maintains a running
@@ -127,29 +199,77 @@ function rangeHeight(blocks: NodeBlock[], startIdx: number, endIdx: number) {
 export function paginate(
   measureEl: HTMLElement,
   maxHeightPx: number
-): Node[][] {
+): PaginatedPage[] {
   const parentTop = measureEl.getBoundingClientRect().top;
   const topBlocks = groupChildNodes(measureEl, parentTop);
 
-  const pages: Node[][] = [[]];
+  const { linePx: FN_LINE_PX, blockOverheadPx: FN_BLOCK_OVERHEAD_PX } =
+    measureFootnoteMetrics(measureEl);
+
+  const pages: PaginatedPage[] = [{ nodes: [], footnoteNumbers: [] }];
   let usedHeight = 0;
   let currentEmpty = true;
 
+  /// Per-page footnote bookkeeping. `footnoteOverhead` is the contribution
+  /// of footnotes (one-time block overhead + N × line height) already added
+  /// to `usedHeight` for the current page. Reset on `openNewPage`.
+  let pageFootnoteSet = new Set<number>();
+  let footnoteOverhead = 0;
+
+  /// Cost of adding the given footnote numbers to the current page, given
+  /// what's already reserved. Skips numbers already on the page.
+  const footnoteCost = (nums: number[]): number => {
+    if (nums.length === 0) return 0;
+    let cost = 0;
+    let firstOnPage = pageFootnoteSet.size === 0;
+    let added = 0;
+    for (const n of nums) {
+      if (pageFootnoteSet.has(n)) continue;
+      added++;
+    }
+    if (added === 0) return 0;
+    if (firstOnPage) cost += FN_BLOCK_OVERHEAD_PX;
+    cost += added * FN_LINE_PX;
+    return cost;
+  };
+
+  /// Commit footnotes to the current page after their citation block has
+  /// been placed. Adds new numbers to the page's set, appends in encounter
+  /// order, and grows `usedHeight` + `footnoteOverhead` accordingly.
+  const commitFootnotes = (nums: number[]) => {
+    if (nums.length === 0) return;
+    let added = 0;
+    const wasEmpty = pageFootnoteSet.size === 0;
+    const page = pages[pages.length - 1];
+    for (const n of nums) {
+      if (pageFootnoteSet.has(n)) continue;
+      pageFootnoteSet.add(n);
+      page.footnoteNumbers.push(n);
+      added++;
+    }
+    if (added === 0) return;
+    let delta = added * FN_LINE_PX;
+    if (wasEmpty) delta += FN_BLOCK_OVERHEAD_PX;
+    usedHeight += delta;
+    footnoteOverhead += delta;
+  };
+
   /// Append cloned nodes to the current page.
   const appendToCurrent = (nodes: Node[]) => {
-    pages[pages.length - 1].push(...nodes);
+    pages[pages.length - 1].nodes.push(...nodes);
     currentEmpty = false;
   };
   /// Open a fresh page.
   const openNewPage = () => {
-    pages.push([]);
+    pages.push({ nodes: [], footnoteNumbers: [] });
     usedHeight = 0;
     currentEmpty = true;
+    pageFootnoteSet = new Set();
+    footnoteOverhead = 0;
   };
 
   /// Place a top-level block whole — used when the block fits.
-  const placeWhole = (block: NodeBlock) => {
-    const cloned = block.nodes.map((n) => n.cloneNode(true));
+  const placeWhole = (block: NodeBlock, cloned: Node[]) => {
     appendToCurrent(cloned);
     usedHeight += block.bottom - block.top;
   };
@@ -164,18 +284,50 @@ export function paginate(
     let sliceStart = 0;
     let cursor = 0;
 
+    /// Per-slice footnote accumulator: numbers found in inner blocks
+    /// [sliceStart..cursor) that haven't been committed yet. Reset whenever
+    /// `sliceStart` advances. We also track per-inner-block clones so we
+    /// don't clone twice.
+    const innerClones: Node[][] = innerBlocks.map((b) =>
+      b.nodes.map((n) => n.cloneNode(true))
+    );
+    const innerFootnotes: number[][] = innerClones.map((ns) =>
+      collectFootnoteNums(ns)
+    );
+
+    /// Footnotes contributed by the pending slice [sliceStart..cursor),
+    /// excluding those already committed to the current page.
+    const pendingSliceNums = (endExclusive: number): number[] => {
+      const seen = new Set<number>();
+      const out: number[] = [];
+      for (let i = sliceStart; i < endExclusive; i++) {
+        for (const n of innerFootnotes[i]) {
+          if (pageFootnoteSet.has(n)) continue;
+          if (seen.has(n)) continue;
+          seen.add(n);
+          out.push(n);
+        }
+      }
+      return out;
+    };
+
     /// Emit a slice [sliceStart..end) into a fresh shell on the current
-    /// page. Returns the slice's height (so caller can update usedHeight).
+    /// page and commit its footnotes. Returns the slice's height.
     const emitSlice = (end: number): number => {
       const shell = shellTemplate.cloneNode(false) as HTMLElement;
+      const sliceFootnotes: number[] = [];
       for (let i = sliceStart; i < end; i++) {
-        for (const node of innerBlocks[i].nodes) {
-          shell.appendChild(node.cloneNode(true));
+        for (const cn of innerClones[i]) {
+          shell.appendChild(cn);
         }
+        for (const n of innerFootnotes[i]) sliceFootnotes.push(n);
       }
       const sliceHeight = rangeHeight(innerBlocks, sliceStart, end - 1);
       appendToCurrent([shell]);
       sliceStart = end;
+      // Caller updates usedHeight with sliceHeight; we add footnotes here
+      // because they're tied to the slice that was just placed.
+      commitFootnotes(sliceFootnotes);
       return sliceHeight;
     };
 
@@ -183,13 +335,16 @@ export function paginate(
       // Try to extend slice [sliceStart..cursor]. The slice's projected
       // height (against where it begins on the current page) is
       // rangeHeight(sliceStart..cursor). It fits if
-      //   rangeHeight ≤ (maxHeightPx − usedHeight at slice start)
+      //   rangeHeight + footnoteCost(new footnotes in slice)
+      //     ≤ (maxHeightPx − usedHeight)
       // We use `pageStartUsed` captured at the slice's beginning; once
       // the slice fits, we can keep extending until it stops fitting.
       const heightSoFar = rangeHeight(innerBlocks, sliceStart, cursor);
+      const pendingNums = pendingSliceNums(cursor + 1);
+      const fnCost = footnoteCost(pendingNums);
       const remaining = maxHeightPx - usedHeight;
 
-      if (heightSoFar <= remaining) {
+      if (heightSoFar + fnCost <= remaining) {
         // Keep-with-next: a heading must not be the last visible block on
         // a page. We look ahead for the next *substantive* block (skipping
         // `<br>` spacers, which would trivially fit and defeat the check)
@@ -203,7 +358,8 @@ export function paginate(
           : -1;
         if (nextIdx !== -1 && !currentEmpty) {
           const pairHeight = rangeHeight(innerBlocks, sliceStart, nextIdx);
-          if (pairHeight > remaining) {
+          const pairFnCost = footnoteCost(pendingSliceNums(nextIdx + 1));
+          if (pairHeight + pairFnCost > remaining) {
             // Fall through to overflow handling below — do NOT advance cursor.
           } else {
             cursor++;
@@ -219,7 +375,8 @@ export function paginate(
       // not including cursor (if non-empty), then move to a new page and
       // retry block at cursor.
       if (cursor > sliceStart) {
-        emitSlice(cursor); // sets sliceStart = cursor
+        const h = emitSlice(cursor); // sets sliceStart = cursor
+        usedHeight += h;
         openNewPage();
         // Re-evaluate cursor on the fresh page.
       } else {
@@ -249,9 +406,13 @@ export function paginate(
   for (let bi = 0; bi < topBlocks.length; bi++) {
     const block = topBlocks[bi];
     const blockHeight = block.bottom - block.top;
+    // Pre-clone so we can scan for footnote markers without re-walking.
+    const cloned = block.nodes.map((n) => n.cloneNode(true));
+    const blockFootnotes = collectFootnoteNums(cloned);
+    const fnCost = footnoteCost(blockFootnotes);
     const remaining = maxHeightPx - usedHeight;
 
-    if (blockHeight <= remaining) {
+    if (blockHeight + fnCost <= remaining) {
       // Keep-with-next: never leave a heading orphaned at the bottom of a
       // page. Look ahead past `<br>` fillers to the next substantive block
       // and force a page break if the pair won't fit.
@@ -260,12 +421,19 @@ export function paginate(
         if (nextIdx !== -1) {
           const next = topBlocks[nextIdx];
           const pairHeight = next.bottom - block.top;
-          if (pairHeight > remaining) {
+          // For the pair fit check, also include footnotes from the next
+          // block (since they'd both land on this page).
+          const nextNums = collectFootnoteNums(
+            next.nodes.map((n) => n.cloneNode(true))
+          );
+          const pairFnCost = footnoteCost([...blockFootnotes, ...nextNums]);
+          if (pairHeight + pairFnCost > remaining) {
             openNewPage();
           }
         }
       }
-      placeWhole(block);
+      placeWhole(block, cloned);
+      commitFootnotes(blockFootnotes);
       continue;
     }
 
@@ -287,12 +455,16 @@ export function paginate(
 
     // Not splittable. Open new page (if needed) and place whole.
     if (!currentEmpty) openNewPage();
-    placeWhole(block);
+    placeWhole(block, cloned);
+    commitFootnotes(blockFootnotes);
   }
 
   // Drop a trailing empty page if any.
-  if (pages.length > 1 && pages[pages.length - 1].length === 0) {
-    pages.pop();
+  if (pages.length > 1) {
+    const last = pages[pages.length - 1];
+    if (last.nodes.length === 0 && last.footnoteNumbers.length === 0) {
+      pages.pop();
+    }
   }
 
   return pages;

@@ -15,7 +15,8 @@ export type GenerateStatus =
   | "awaitingAnswers"
   | "streaming"
   | "done"
-  | "error";
+  | "error"
+  | "cancelled";
 
 /// Public state shape exposed to the popover component.
 export interface GenerateSectionState {
@@ -169,7 +170,18 @@ export function useGenerateSection(sectionId: string, provider: string) {
           },
         });
       } catch (err) {
-        if ((err as Error).name === "AbortError") return;
+        if ((err as Error).name === "AbortError") {
+          // User clicked Stop (or a newer call superseded this one).
+          // Surface a silent `cancelled` state so callers can keep the
+          // partial draft on screen without rendering a "Streaming
+          // failed" error toast.
+          setState((prev) =>
+            prev.status === "streaming"
+              ? { ...prev, status: "cancelled", error: null }
+              : prev,
+          );
+          return;
+        }
         setState((prev) => ({
           ...prev,
           status: "error",
@@ -219,7 +231,16 @@ export function useGenerateSection(sectionId: string, provider: string) {
         }
         parsed = (await res.json()) as ClarifyResponse;
       } catch (err) {
-        if ((err as Error).name === "AbortError") return;
+        if ((err as Error).name === "AbortError") {
+          // Cancelled while the clarify request was outstanding —
+          // silent transition.
+          setState((prev) =>
+            prev.status === "clarifying"
+              ? { ...prev, status: "cancelled", error: null }
+              : prev,
+          );
+          return;
+        }
         setState((prev) => ({
           ...prev,
           status: "error",

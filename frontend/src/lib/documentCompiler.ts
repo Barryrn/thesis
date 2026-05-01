@@ -474,7 +474,7 @@ export function renderSectionToHtml(
           }
           const num = footnoteCounter++;
           footnotes.push({ number: num, text: footnoteText });
-          replacement = `<sup class="footnote-ref">${num}</sup>`;
+          replacement = `<sup class="footnote-ref" data-fn-num="${num}">${num}</sup>`;
           break;
         }
 

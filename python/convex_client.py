@@ -72,6 +72,29 @@ def update_status(paper_id: str, status: str, error: str | None = None):
     return _mutation("papers:updatePaperStatus", args)
 
 
+def get_paper_status(paper_id: str) -> str | None:
+    """Read the current `status` field for a paper.
+
+    Used by the processing pipeline as a between-stage cancellation
+    probe — when the Convex value flips to ``cancelled`` (via the
+    ``cancelPaperProcessing`` mutation), the worker exits without
+    starting the next stage. Returns ``None`` when the paper has been
+    deleted or the query fails so the caller can decide whether to
+    bail out or keep going.
+    """
+    try:
+        result = _query("papers:getPaper", {"paperId": paper_id})
+    except Exception:
+        return None
+    if not isinstance(result, dict):
+        return None
+    paper = result.get("value")
+    if not isinstance(paper, dict):
+        return None
+    status = paper.get("status")
+    return status if isinstance(status, str) else None
+
+
 def update_processing_step(paper_id: str, step: str | None):
     """Call papers:updateProcessingStep to update the UI progress indicator."""
     args: dict = {"paperId": paper_id}

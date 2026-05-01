@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 
 // ===== HELPERS =====
 
@@ -480,6 +481,31 @@ export const getExcerptsByMatch = query({
       .collect();
 
     excerpts.sort((a, b) => a.orderIndex - b.orderIndex);
+    return excerpts;
+  },
+});
+
+/// Returns every excerpt for the given papers, regardless of which section
+/// they were originally collected under. Used by the section editor's
+/// FUSSNOTEN panel to surface the source quote + relevance note behind each
+/// citation — a citation references a *paper*, not a paper-in-this-section,
+/// so a section-scoped lookup would hide notes whenever the paper happens to
+/// be matched under a different section.
+export const getExcerptsByPaperIds = query({
+  args: { paperIds: v.array(v.id("papers")) },
+  handler: async (ctx, args) => {
+    const excerpts: Doc<"matchExcerpts">[] = [];
+    for (const paperId of args.paperIds) {
+      const rows = await ctx.db
+        .query("matchExcerpts")
+        .withIndex("by_paper_section", (q) => q.eq("paperId", paperId))
+        .collect();
+      excerpts.push(...rows);
+    }
+    excerpts.sort(
+      (a, b) =>
+        a.paperId.localeCompare(b.paperId) || a.orderIndex - b.orderIndex
+    );
     return excerpts;
   },
 });

@@ -13,6 +13,7 @@ import { api } from "../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Loader2 } from "lucide-react";
+import { AISurfaceProgress } from "@/components/ai-progress";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useLanguage } from "@/lib/LanguageContext";
@@ -46,6 +47,17 @@ export default function ZoteroImport() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  /// Item count + completed count drive the determinate progress bar
+  /// and the secondary caption ("3 / 12 items"). Reset on every fresh
+  /// import so a previous run's totals don't leak into the next.
+  const [importProgress, setImportProgress] = useState({
+    completed: 0,
+    total: 0,
+    currentLabel: "",
+  });
+  /// Live AbortController for the SSE reader. Set when an import starts,
+  /// cleared when it settles or the user clicks Stop.
+  const importAbortRef = useRef<AbortController | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const [deleteMenuKey, setDeleteMenuKey] = useState<string | null>(null);
@@ -213,6 +225,7 @@ export default function ZoteroImport() {
 
     setImporting(true);
     setShowLogs(true);
+    setImportProgress({ completed: 0, total: toImport.length, currentLabel: "" });
     addLog("info", `Starting import of ${toImport.length} item(s)...`);
 
     // Build sections payload for the /process pipeline
@@ -223,10 +236,17 @@ export default function ZoteroImport() {
       notes: s.notes,
     }));
 
+    // Fresh AbortController for this run. Stop button hits its `abort()`
+    // which short-circuits both the underlying fetch and the SSE reader.
+    importAbortRef.current?.abort();
+    const controller = new AbortController();
+    importAbortRef.current = controller;
+
     try {
       const res = await fetch(`${PYTHON_SERVICE_URL}/zotero/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           items: toImport,
           sections: sectionPayload,
@@ -265,6 +285,15 @@ export default function ZoteroImport() {
 
             if (payload.type === "progress") {
               addLog("info", payload.message);
+              // The backend emits a `progress` event per item with the
+              // current label; surface it under the spinner so the user
+              // sees what's being imported right now.
+              if (typeof payload.message === "string") {
+                setImportProgress((prev) => ({
+                  ...prev,
+                  currentLabel: payload.message,
+                }));
+              }
             } else if (payload.type === "item_complete") {
               const label =
                 toImport.find((i) => i.key === payload.itemKey)?.title ??
@@ -274,6 +303,10 @@ export default function ZoteroImport() {
               } else {
                 addLog("error", `Failed "${label}": ${payload.error}`);
               }
+              setImportProgress((prev) => ({
+                ...prev,
+                completed: Math.min(prev.completed + 1, prev.total || 0),
+              }));
             } else if (payload.type === "done") {
               addLog(
                 payload.successCount === payload.totalCount ? "ok" : "warn",
@@ -288,9 +321,26 @@ export default function ZoteroImport() {
 
       setSelectedItems(new Set());
     } catch (e) {
-      addLog("error", `Import request failed: ${e}`);
+      // User-initiated abort lands silently with a friendly log line
+      // rather than the generic "request failed" message.
+      if (e instanceof DOMException && e.name === "AbortError") {
+        addLog("warn", "Import stopped");
+      } else {
+        addLog("error", `Import request failed: ${e}`);
+      }
     } finally {
       setImporting(false);
+      if (importAbortRef.current === controller) importAbortRef.current = null;
+    }
+  }
+
+  /// Aborts the in-flight import. Already-completed items remain in the
+  /// project (no rollback) — mirrors how a user closing the page mid-run
+  /// already behaves.
+  function handleStopImport() {
+    if (importAbortRef.current) {
+      importAbortRef.current.abort();
+      importAbortRef.current = null;
     }
   }
 
@@ -479,6 +529,23 @@ export default function ZoteroImport() {
           )}
         </div>
       </div>
+
+      {/* Import progress strip — visible while a Zotero import is in
+          flight. Surfaces a determinate bar driven by item_complete SSE
+          events plus a Stop button that aborts the underlying reader. */}
+      {importing && (
+        <AISurfaceProgress
+          label={`Importing ${importProgress.completed} / ${importProgress.total} item(s)…`}
+          detail={importProgress.currentLabel || undefined}
+          progress={
+            importProgress.total > 0
+              ? importProgress.completed / importProgress.total
+              : undefined
+          }
+          onStop={handleStopImport}
+          stopLabel="Stop import"
+        />
+      )}
 
       {/* Import button */}
       <div className="flex items-center justify-between">

@@ -12,7 +12,7 @@
 /// The hook itself does no DB writes — it just returns the partition so
 /// the caller can run the rewrite atomically alongside the existing
 /// autosave path.
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
 import { replacePendingMarker } from "@/lib/citationUtils";
 import type { CitationType, PendingCitation } from "@/lib/types";
@@ -43,7 +43,12 @@ export const AUTO_PROMOTE_THRESHOLD = 0.75;
 /// targets paraphrased claims, so indirect ("Vgl.") is the safe default.
 const DEFAULT_CITATION_TYPE: CitationType = "indirect";
 
-export type ValidateStatus = "idle" | "loading" | "success" | "error";
+export type ValidateStatus =
+  | "idle"
+  | "loading"
+  | "success"
+  | "error"
+  | "cancelled";
 
 /// Outcome of `run`. The caller applies `body` (with promoted markers
 /// already swapped in) and creates one section TODO per `unresolved` row.
@@ -73,6 +78,11 @@ export interface UseValidateCitations {
     pendingCitations: PendingCitation[]
   ) => Promise<ValidateRunResult | null>;
   reset: () => void;
+  /// Aborts an in-flight validate request and lands in `cancelled`.
+  cancel: () => void;
+  /// Synchronous read of whether the most recent `run()` was aborted by
+  /// the user. See `useDetectCitations` for the same rationale.
+  wasCancelled: () => boolean;
 }
 
 /// Builds a {{cite:...}} marker for an auto-promoted resolution.
@@ -89,11 +99,27 @@ export function useValidateCitations(
 ): UseValidateCitations {
   const [status, setStatus] = useState<ValidateStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  /// Live AbortController for any /validate-citations request in flight.
+  const abortRef = useRef<AbortController | null>(null);
+  /// Synchronous cancellation flag — see `useDetectCitations`.
+  const cancelledRef = useRef(false);
 
   const reset = useCallback(() => {
     setStatus("idle");
     setError(null);
   }, []);
+
+  const cancel = useCallback(() => {
+    if (abortRef.current) {
+      cancelledRef.current = true;
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setStatus((prev) => (prev === "loading" ? "cancelled" : prev));
+    setError(null);
+  }, []);
+
+  const wasCancelled = useCallback(() => cancelledRef.current, []);
 
   const run = useCallback(
     async (
@@ -111,6 +137,7 @@ export function useValidateCitations(
 
       setStatus("loading");
       setError(null);
+      cancelledRef.current = false;
 
       // Build per-placeholder request items by re-extracting each chip's
       // claim sentence from the live body. This way an edit between detect
@@ -134,10 +161,17 @@ export function useValidateCitations(
         return { body, promoted: [], unresolved: [], resultsById: {} };
       }
 
+      // Newer requests supersede in-flight ones; same pattern as the
+      // detect/optimize/generate hooks.
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       try {
         const res = await fetch(`${PYTHON_SERVICE_URL}/validate-citations`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             sectionId: options.sectionId,
             body,
@@ -197,6 +231,10 @@ export function useValidateCitations(
         setStatus("success");
         return { body: workingBody, promoted, unresolved, resultsById };
       } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          setStatus((prev) => (prev === "loading" ? "cancelled" : prev));
+          return null;
+        }
         const message = e instanceof Error ? e.message : String(e);
         setStatus("error");
         setError(message);
@@ -205,12 +243,14 @@ export function useValidateCitations(
           console.debug("[auto-cite] validate failed:", message);
         }
         return null;
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
       }
     },
     [options.sectionId, options.provider]
   );
 
-  return { status, error, run, reset };
+  return { status, error, run, reset, cancel, wasCancelled };
 }
 
 /// Locates the sentence containing the placeholder marker in `body` and

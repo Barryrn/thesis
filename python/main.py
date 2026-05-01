@@ -30,6 +30,29 @@ from pipeline_logger import get_logger, set_paper_context, PipelineStep
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
+
+class PipelineCancelled(Exception):
+    """Raised when the user cancels a paper processing run mid-flight.
+
+    The /process endpoint catches this at the outer try and exits the
+    pipeline cleanly without flipping the paper to ``failed`` — the
+    Convex `cancelPaperProcessing` mutation has already moved the row
+    to ``cancelled`` and the UI typically deletes it shortly after.
+    """
+
+
+async def _check_cancellation(paper_id: str) -> None:
+    """Probe Convex for the paper's status and raise if cancelled.
+
+    Called between every pipeline stage so a user-clicked Stop becomes
+    effective at the next stage boundary. Network errors don't block
+    the pipeline — the status query is best-effort and a transient
+    Convex outage shouldn't take a healthy run down.
+    """
+    status = await run_in_threadpool(convex_client.get_paper_status, paper_id)
+    if status == "cancelled":
+        raise PipelineCancelled(paper_id)
+
 app = FastAPI()
 
 app.add_middleware(
@@ -108,6 +131,7 @@ async def process(req: ProcessRequest):
     tmp_path = None
     try:
         # 1. Download file to temp dir
+        await _check_cancellation(req.paperId)
         await run_in_threadpool(convex_client.update_processing_step, req.paperId, "downloading")
         suffix = _get_suffix(req.fileUrl)
         with PipelineStep("download_file", detail=f"suffix={suffix}"):
@@ -118,6 +142,7 @@ async def process(req: ProcessRequest):
             logger.debug(f"Downloaded {file_size} bytes to {tmp_path}", extra={"step": "download_file"})
 
         # 2. Extract text + metadata
+        await _check_cancellation(req.paperId)
         await run_in_threadpool(convex_client.update_processing_step, req.paperId, "extracting")
         with PipelineStep("extract_text", detail=f"format={suffix}"):
             extracted = extractor.extract(tmp_path, provider=req.provider)
@@ -128,6 +153,7 @@ async def process(req: ProcessRequest):
             )
 
         # 3. Detect identifiers
+        await _check_cancellation(req.paperId)
         await run_in_threadpool(convex_client.update_processing_step, req.paperId, "identifying")
         with PipelineStep("detect_identifiers"):
             identifiers = identifier.detect(extracted["text"])
@@ -137,6 +163,7 @@ async def process(req: ProcessRequest):
             )
 
         # 4. Summarize
+        await _check_cancellation(req.paperId)
         await run_in_threadpool(convex_client.update_processing_step, req.paperId, "summarizing")
         with PipelineStep("summarize", detail=f"text_len={len(extracted['text'])}, language={req.language}"):
             summary = summarizer.summarize(extracted["text"], language=req.language, provider=req.provider)
@@ -148,6 +175,7 @@ async def process(req: ProcessRequest):
         # 5. Save to Convex (summary only — citation happens on-demand via /cite)
         # When skip_metadata_enrichment is set (Zotero import), we only save
         # the summary and identifiers — title/authors/year are already correct.
+        await _check_cancellation(req.paperId)
         await run_in_threadpool(convex_client.update_processing_step, req.paperId, "saving")
         with PipelineStep("save_to_convex"):
             if not req.skip_metadata_enrichment:
@@ -269,6 +297,19 @@ async def process(req: ProcessRequest):
             convex_client.update_status(req.paperId, "completed")
 
         logger.info("Pipeline completed successfully", extra={"step": "pipeline", "status": "completed"})
+
+    except PipelineCancelled:
+        # User cancelled mid-flight — Convex already shows `cancelled`
+        # so we just log and exit. The paper row stays cancelled until
+        # the UI deletes it (or the user retries).
+        logger.info(
+            "Pipeline cancelled by user",
+            extra={"step": "pipeline", "status": "cancelled"},
+        )
+        return JSONResponse(
+            status_code=499,
+            content={"detail": "cancelled"},
+        )
 
     except Exception as e:
         logger.error(
