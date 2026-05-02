@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useGenerateSection } from "@/hooks/useGenerateSection";
-import { parseCitations } from "@/lib/citationUtils";
+import { parseCitations, tagAiOriginInBody } from "@/lib/citationUtils";
 
 interface GenerateSectionPopoverProps {
   /// Whether the sheet is open. Owned by the parent (the toolbar
@@ -141,12 +141,15 @@ export default function GenerateSectionPopover({
                   status={state.status === "streaming" ? "streaming" : "done"}
                   hasExistingBody={hasExistingBody}
                   onInsertReplace={() => {
-                    onInsert(state.draft);
+                    // Tag every cite marker the model produced with origin:ai
+                    // so the editor can visually distinguish AI-inserted
+                    // citations from manual @-picker inserts.
+                    onInsert(tagAiOriginInBody(state.draft));
                     onOpenChange(false);
                   }}
                   onInsertAppend={() => {
                     const sep = existingBody.endsWith("\n\n") ? "" : "\n\n";
-                    onInsert(existingBody + sep + state.draft);
+                    onInsert(existingBody + sep + tagAiOriginInBody(state.draft));
                     onOpenChange(false);
                   }}
                   onCancel={() => abort()}

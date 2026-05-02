@@ -406,3 +406,116 @@ class TestChunkValidateItems:
         assert len(batches) >= 2
         total = sum(len(b) for b in batches)
         assert total == 60
+
+
+# ---------------------------------------------------------------------------
+# build_generation_messages — two-pass (prose-only) mode
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGenerationMessagesProseOnly:
+    """Default mode: writer must NOT emit citation markers.
+
+    Two-pass generation hands the draft off to detect+validate for
+    citations. The system prompt must therefore actively forbid the
+    writer from producing any `{{cite:...}}` markers, while still
+    instructing it to ground claims in the supplied corpus.
+    """
+
+    def test_default_mode_is_prose_only(self):
+        """No `cite_inline` arg → prose-only contract is selected."""
+        payload = _sample_payload()
+        system, _user = section_writer.build_generation_messages(
+            payload, guidance=None, answers=None
+        )
+        # The legacy CITATION CONTRACT phrase must be absent…
+        assert "CITATION CONTRACT" not in system
+        # …and the new WRITING CONTRACT must be present and explicit.
+        assert "WRITING CONTRACT" in system
+        assert "Do NOT produce any citation markers" in system
+        # The legacy example markers (`{{cite:PAPER_ID::direct::p.42}}`)
+        # must not appear — the only acceptable mention of `{{cite:` in
+        # this prompt is inside the prohibition itself.
+        assert "{{cite:PAPER_ID" not in system
+
+    def test_prose_only_keeps_papers_context(self):
+        """Even with no citations, the user prompt must still include
+        summaries + excerpts so the writer can ground its claims."""
+        payload = _sample_payload(num_papers=2)
+        _system, user = section_writer.build_generation_messages(
+            payload, guidance=None, answers=None
+        )
+        assert "<allowed_paper_ids>" in user
+        assert "<papers>" in user
+        # Both paperIds reach the prompt.
+        assert "p1" in user
+        assert "p2" in user
+        # Summary fields propagate.
+        assert "Research question" in user
+        assert "Methodology" in user
+        # Excerpts propagate verbatim.
+        assert "Excerpt for paper p1." in user
+
+    def test_explicit_cite_inline_true_restores_legacy_prompt(self):
+        """`cite_inline=True` must restore the one-pass CITATION CONTRACT."""
+        payload = _sample_payload()
+        system, _user = section_writer.build_generation_messages(
+            payload, guidance=None, answers=None, cite_inline=True
+        )
+        assert "CITATION CONTRACT" in system
+        assert "{{cite:PAPER_ID::direct::p.42}}" in system
+        assert "WRITING CONTRACT" not in system
+
+    def test_guidance_and_answers_flow_through(self):
+        """User-supplied guidance and clarify answers must reach the
+        prompt regardless of mode."""
+        payload = _sample_payload()
+        _system, user = section_writer.build_generation_messages(
+            payload,
+            guidance="focus on methodology",
+            answers=[{"question": "Scope?", "answer": "Just the pilot"}],
+        )
+        assert "focus on methodology" in user
+        assert "Scope?" in user
+        assert "Just the pilot" in user
+
+
+# ---------------------------------------------------------------------------
+# strip_all_citation_markers — used in two-pass mode to scrub leakage
+# ---------------------------------------------------------------------------
+
+
+class TestStripAllCitationMarkers:
+    """Belt-and-suspenders scrubbing for two-pass mode.
+
+    The prompt forbids `{{cite:...}}`, but LLMs occasionally leak. The
+    server strips silently and reports a count so the caller can log a
+    soft warning if leakage was material.
+    """
+
+    def test_no_markers_returns_unchanged(self):
+        text = "Plain prose with no citations whatsoever."
+        cleaned, count = section_writer.strip_all_citation_markers(text)
+        assert cleaned == text
+        assert count == 0
+
+    def test_strips_direct_and_indirect_markers(self):
+        text = (
+            "First claim {{cite:p1::direct::p.4}} and second "
+            "claim {{cite:p2::indirect::S. 12}}."
+        )
+        cleaned, count = section_writer.strip_all_citation_markers(text)
+        assert "{{cite:" not in cleaned
+        assert count == 2
+        # Surrounding prose preserved (modulo the marker substring).
+        assert cleaned.startswith("First claim ")
+        assert cleaned.endswith(".")
+
+    def test_leaves_pending_citation_chips_alone(self):
+        """Pending `{{citeNeeded:...}}` chips belong to the detect phase
+        and must NOT be stripped by this scrubber — only resolved
+        `{{cite:...}}` markers are forbidden in two-pass draft output."""
+        text = "Claim {{citeNeeded:abc::needs source}}."
+        cleaned, count = section_writer.strip_all_citation_markers(text)
+        assert cleaned == text
+        assert count == 0

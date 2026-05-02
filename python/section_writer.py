@@ -352,8 +352,19 @@ def build_generation_messages(
     payload: dict[str, Any],
     guidance: str | None,
     answers: list[dict[str, str]] | None,
+    cite_inline: bool = False,
 ) -> tuple[str, str]:
-    """Build (system, user) for the streaming /generate-section call."""
+    """Build (system, user) for the streaming /generate-section call.
+
+    ``cite_inline`` toggles between two modes:
+      • ``False`` (default, two-pass): the writer produces clean prose
+        only. Citations are added in a separate pass via the existing
+        detect+validate pipeline. This gives each claim a chance to be
+        scored against every candidate paper rather than committing to
+        whichever paper the model was thinking about mid-sentence.
+      • ``True``: legacy one-pass mode. The writer emits ``{{cite:...}}``
+        markers inline as it writes. Kept for backwards compat / debug.
+    """
     lang = payload.get("resolvedLanguage") or "en"
     lang_name = _LANG_NAMES.get(lang, "English")
     section = payload["section"]
@@ -365,7 +376,7 @@ def build_generation_messages(
         "a master's thesis. You will be given the section's outline notes, "
         "neighbouring section titles, optional user guidance, and a curated "
         "corpus of mapped papers (with summaries and verbatim excerpts) "
-        "that this section is allowed to cite."
+        "to ground your writing."
     )
     system_lines.append(
         f"\nWrite the section in {lang_name}. Use a formal academic register: "
@@ -373,28 +384,56 @@ def build_generation_messages(
         "section we will…'), no concluding meta-summary. Write in flowing "
         "paragraphs."
     )
-    system_lines.append(
-        "\nCITATION CONTRACT — non-negotiable:\n"
-        "  • You may ONLY cite paperIds listed in <allowed_paper_ids>. "
-        "Citing any other paperId is forbidden.\n"
-        "  • You may ONLY use page numbers that appear in the supplied "
-        "excerpts for that paper. Do NOT invent page numbers.\n"
-        "  • If a claim cannot be grounded in the supplied summary or "
-        "excerpts, omit it or rephrase it as a non-claim. Do not fabricate "
-        "supporting facts.\n"
-        "  • Citation marker format is exactly:\n"
-        "      {{cite:PAPER_ID::direct::p.42}}    for verbatim quotations\n"
-        "      {{cite:PAPER_ID::indirect::p.42}}  for paraphrased claims\n"
-        "    Use 'direct' only when the prose is a verbatim excerpt; use "
-        "'indirect' for paraphrases drawn from the summary or excerpts. "
-        "If no precise page is available, use 'p. ?' as the page reference."
-    )
+
+    if cite_inline:
+        system_lines.append(
+            "\nCITATION CONTRACT — non-negotiable:\n"
+            "  • You may ONLY cite paperIds listed in <allowed_paper_ids>. "
+            "Citing any other paperId is forbidden.\n"
+            "  • You may ONLY use page numbers that appear in the supplied "
+            "excerpts for that paper. Do NOT invent page numbers.\n"
+            "  • If a claim cannot be grounded in the supplied summary or "
+            "excerpts, omit it or rephrase it as a non-claim. Do not "
+            "fabricate supporting facts.\n"
+            "  • Citation marker format is exactly:\n"
+            "      {{cite:PAPER_ID::direct::p.42}}    for verbatim quotations\n"
+            "      {{cite:PAPER_ID::indirect::p.42}}  for paraphrased claims\n"
+            "    Use 'direct' only when the prose is a verbatim excerpt; use "
+            "'indirect' for paraphrases drawn from the summary or excerpts. "
+            "If no precise page is available, use 'p. ?' as the page reference."
+        )
+    else:
+        # Two-pass mode: prose only. The detect+validate phase that runs
+        # after this stream is responsible for matching each claim to the
+        # best-fitting paper, scored against every candidate.
+        system_lines.append(
+            "\nWRITING CONTRACT — non-negotiable:\n"
+            "  • Write CLEAN PROSE ONLY. Do NOT produce any citation "
+            "markers — no `{{cite:...}}`, no `(Author, Year)`, no footnote "
+            "numbers, no bracketed references of any kind. Citations are "
+            "added in a separate pass after this draft is complete.\n"
+            "  • Ground every claim in the supplied summaries and excerpts. "
+            "If a claim cannot be grounded, omit it or rephrase it as a "
+            "non-claim. Do not fabricate supporting facts.\n"
+            "  • Stay close to the topics, methodologies, and findings the "
+            "supplied papers actually cover — the citation pass can only "
+            "attach a paper to a claim that paper plausibly supports."
+        )
+
     system_lines.append(f"\n{_length_guidance(depth, lang)}")
-    system_lines.append(
-        "\nOutput contract: return only the prose for this section. No "
-        "preamble, no leading heading, no trailing summary, no JSON, no "
-        "code fences. Citation markers appear inline within the prose."
-    )
+
+    if cite_inline:
+        system_lines.append(
+            "\nOutput contract: return only the prose for this section. No "
+            "preamble, no leading heading, no trailing summary, no JSON, no "
+            "code fences. Citation markers appear inline within the prose."
+        )
+    else:
+        system_lines.append(
+            "\nOutput contract: return only the prose for this section. No "
+            "preamble, no leading heading, no trailing summary, no JSON, no "
+            "code fences, no citations of any kind."
+        )
 
     system = "\n".join(system_lines)
     user = _shared_context_block(payload, guidance, answers)
@@ -450,6 +489,24 @@ def validate_citation_markers(
 
     cleaned = _CITE_MARKER_RE.sub(_replace, text)
     return cleaned, warnings
+
+
+def strip_all_citation_markers(text: str) -> tuple[str, int]:
+    """Scrub every ``{{cite:...}}`` marker from text.
+
+    Used in two-pass mode: even though the prompt forbids citations,
+    LLMs occasionally leak them. We strip silently and return a count
+    so the caller can log a soft warning if the leakage was material.
+    """
+    count = 0
+
+    def _drop(_match: re.Match[str]) -> str:
+        nonlocal count
+        count += 1
+        return ""
+
+    cleaned = _CITE_MARKER_RE.sub(_drop, text)
+    return cleaned, count
 
 
 def _looks_unverifiable(page: str) -> bool:

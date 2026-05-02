@@ -70,13 +70,18 @@ export function rawTextToDecoratedHtml(
     if (!part) continue;
 
     if (CITE_ANY_RE.test(part)) {
-      // Citation marker
+      // Citation marker. The marker grammar may carry a trailing
+      // `::origin:ai|user` segment; only `ai` gets the visual tint. Markers
+      // without an explicit origin are treated as user (legacy default).
       const num = footnoteNumber
         ? footnoteNumber(citationIndex)
         : citationIndex + 1;
       citationIndex++;
+      const isAi = /::origin:ai\}\}$/.test(part);
+      const classAttr = isAi ? "ce-citation ce-citation--ai" : "ce-citation";
+      const originAttr = isAi ? ` data-origin="ai"` : "";
       html +=
-        `<span class="ce-citation" data-marker="${escapeHtml(part)}" contenteditable="false">` +
+        `<span class="${classAttr}" data-marker="${escapeHtml(part)}"${originAttr} contenteditable="false">` +
         `<sup>${num}</sup></span>`;
     } else if (CITE_NEEDED_RE.test(part)) {
       // Unresolved auto-citation placeholder. Render as a yellow striped chip
@@ -135,10 +140,12 @@ export function decoratedDomToRawText(container: HTMLElement): string {
   walkForRawText(container, container, (text) => {
     result += text;
   });
-  // Browsers often append a trailing <br> inside contentEditable — trim it
-  if (result.endsWith("\n")) {
-    result = result.slice(0, -1);
-  }
+  // Strip both leading and trailing newlines. Browsers can leave stray <br>
+  // / empty <div> blocks at the start (from past serialization bugs that
+  // saved a leading "\n" into the body) or at the end (auto-inserted caret
+  // landing block). Without this, the saved body grows by one blank line
+  // each time the editor mounts → serializes → saves.
+  result = result.replace(/^\n+/, "").replace(/\n+$/, "");
   return result;
 }
 
@@ -171,8 +178,12 @@ function walkForRawText(
 
   // <div> without data-marker — browsers wrap lines in divs on Enter.
   // Prepend a newline unless this is the first child of the root container
-  // (the first div shouldn't double-add a leading newline).
-  if (node.tagName === "DIV") {
+  // (the first div shouldn't double-add a leading newline). Also skip when
+  // `node === root`: the root container itself isn't a "line" — it's the
+  // editor host — so emitting a leading newline for it would cause every
+  // save to prepend an extra `\n` to the body, which then renders as a blank
+  // line at the very top of the editor on the next mount.
+  if (node.tagName === "DIV" && node !== root) {
     const isFirstChild = node === root.firstChild;
     if (!isFirstChild) {
       // Only prepend newline if the previous sibling didn't already end with
@@ -239,8 +250,14 @@ function rawTextOffsetOf(
 
   let acc = 0;
 
-  // <div> prepends newline (same logic as walkForRawText)
-  if (node.tagName === "DIV" && node !== root.firstChild) {
+  // <div> prepends newline (same logic as walkForRawText). Guard with
+  // `node !== root`: the editor host is itself a <div>, but it's the
+  // container, not a "line", so it must not contribute a leading newline to
+  // the offset arithmetic. Without this, raw-text offsets read off the live
+  // caret are 1 too high whenever the editor body is a flat text node (no
+  // inner block wrappers), which silently corrupts @-trigger detection
+  // (`pickerQuery` includes the next character) and citation insert ranges.
+  if (node.tagName === "DIV" && node !== root && node !== root.firstChild) {
     const prev = node.previousSibling;
     const prevEndsWithBr =
       prev instanceof HTMLElement && prev.tagName === "BR";
@@ -371,8 +388,12 @@ function findNodeAtRawOffset(
     return null;
   }
 
-  // <div> may contribute a leading newline
-  if (node.tagName === "DIV" && node !== root.firstChild) {
+  // <div> may contribute a leading newline. Mirror the `node !== root` guard
+  // used in `walkForRawText` — the editor host is a <div> too, but it doesn't
+  // count as a "line" itself; without this guard offsets shift by one when
+  // the editor hasn't yet been split into <div> child blocks (e.g. a single
+  // unwrapped text node).
+  if (node.tagName === "DIV" && node !== root && node !== root.firstChild) {
     const prev = node.previousSibling;
     const prevEndsWithBr =
       prev instanceof HTMLElement && prev.tagName === "BR";
@@ -417,6 +438,44 @@ export function getCaretPixelPosition(
     top: rangeRect.top - containerRect.top + container.scrollTop,
     left: rangeRect.left - containerRect.left,
   };
+}
+
+// ── setSelectionRangeFromRawTextOffsets ─────────────────────────────
+
+/// Selects the DOM range corresponding to the raw-text offsets `[start, end]`.
+/// Used by undo-preserving citation insertion: the caller selects the slice
+/// of text being replaced, then issues `document.execCommand("insertHTML", …)`
+/// so the browser records the swap as a single undoable step.
+/// Returns true iff both endpoints resolved to a DOM position.
+export function setSelectionRangeFromRawTextOffsets(
+  container: HTMLElement,
+  start: number,
+  end: number
+): boolean {
+  const sel = window.getSelection();
+  if (!sel) return false;
+
+  const a = Math.min(start, end);
+  const b = Math.max(start, end);
+
+  const startPos = findNodeAtRawOffset(container, container, a);
+  const endPos = findNodeAtRawOffset(container, container, b);
+  if (!startPos || !endPos) return false;
+
+  const range = document.createRange();
+  try {
+    range.setStart(startPos.node, startPos.offset);
+    range.setEnd(endPos.node, endPos.offset);
+  } catch {
+    // Endpoints can fall on nodes that are no longer mounted under `container`
+    // if the DOM mutated between resolution and `setStart` (rare, but the
+    // browser will throw `InvalidNodeTypeError`). Bail out so the caller can
+    // fall back to a non-undoable rerender path.
+    return false;
+  }
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return true;
 }
 
 // ── getSelectionRangeInRawText ──────────────────────────────────────

@@ -23,6 +23,7 @@ import {
   Lightbulb,
   FlaskConical,
   FileText,
+  Eye,
   Unlink,
   BookOpen,
   Loader2,
@@ -39,6 +40,7 @@ import type {
   GroupId,
 } from "@/lib/types";
 import GroupPillRow from "./GroupPillRow";
+import DocumentPreviewModal from "./DocumentPreviewModal";
 import type { Id } from "../../convex/_generated/dataModel";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
 import { useProvider } from "@/lib/ProviderContext";
@@ -1132,6 +1134,10 @@ export default function PaperSummaryCard({
     [setMatchExpandedMutation, match.matchId],
   );
 
+  // PDF preview modal state. Opens DocumentPreviewModal so the user can read
+  // the paper without leaving the editor / library context.
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+
   // Document notes state
   const [docNotesExpanded, setDocNotesExpanded] = useState(false);
   const [docNotesValue, setDocNotesValue] = useState(paper?.notes ?? "");
@@ -1194,6 +1200,40 @@ export default function PaperSummaryCard({
       setAiRunning(false);
     }
   }, [paper, summary, match.paperId, sectionId, allSections, provider, t]);
+
+  /// Mirrors Dashboard's `triggerCitation` so the embedded
+  /// `DocumentPreviewModal` can assign this paper to additional sections from
+  /// inside the card. Runs /cite for each target section so excerpts and
+  /// scores are populated server-side. The card lives inside DndContext, so
+  /// the modal renders here rather than at the page root.
+  const triggerCitationFromPreview = useCallback(
+    async (paperId: typeof match.paperId, sectionIds: SectionId[]) => {
+      if (!paper?.fileUrl && !paper?.manualContent) return;
+      const sectionsPayload = allSections.map((s) => ({
+        _id: s._id,
+        title: s.title,
+        orderNumber: s.orderNumber,
+        notes: s.notes,
+      }));
+      try {
+        await fetch(`${PYTHON_SERVICE_URL}/cite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paperId,
+            fileUrl: paper.fileUrl || "",
+            sectionIds,
+            sections: sectionsPayload,
+            language: "en",
+            provider,
+          }),
+        });
+      } catch (err) {
+        console.error("[CITE] Citation request failed:", err);
+      }
+    },
+    [paper, allSections, provider, match.paperId],
+  );
 
   const aiButtonLabel = aiRunning
     ? t("paperCard.runAi.running")
@@ -1366,6 +1406,23 @@ export default function PaperSummaryCard({
             <span className="text-[10px] text-amber-dim">{t("paperCard.manualBadge")}</span>
           )}
           <div className="flex items-center gap-1">
+            {/* Quick PDF preview — only when the paper has an uploaded file.
+                Reuses the existing DocumentPreviewModal/PdfViewer pair so
+                styling and full-screen behavior stay consistent with the
+                library view. */}
+            {paper?.fileUrl && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPdfPreviewOpen(true);
+                }}
+                className="text-muted-foreground/60 hover:text-amber transition-colors p-0.5"
+                title={t("paperCard.viewPdf")}
+                aria-label={t("paperCard.viewPdf")}
+              >
+                <Eye className="size-3.5" />
+              </button>
+            )}
             <button
               onClick={handleUnlink}
               className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all p-0.5"
@@ -1688,6 +1745,13 @@ export default function PaperSummaryCard({
           </>
         )}
       </div>
+      {pdfPreviewOpen && paper && (
+        <DocumentPreviewModal
+          paper={paper}
+          onClose={() => setPdfPreviewOpen(false)}
+          onCite={triggerCitationFromPreview}
+        />
+      )}
     </div>
   );
 }

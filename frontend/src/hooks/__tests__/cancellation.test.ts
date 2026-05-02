@@ -17,6 +17,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useDetectCitations } from "../useDetectCitations";
+import { useGenerateSection } from "../useGenerateSection";
 import { useTextOptimize } from "../useTextOptimize";
 import { useValidateCitations } from "../useValidateCitations";
 
@@ -108,6 +109,64 @@ describe("useValidateCitations.cancel", () => {
     expect(settled).toBeNull();
     await waitFor(() => expect(result.current.status).toBe("cancelled"));
     expect(result.current.error).toBeNull();
+  });
+});
+
+describe("useGenerateSection.abort", () => {
+  /// Cancellation while the /clarify roundtrip is outstanding must
+  /// land in `cancelled`, not `error`. The two-pass chain (detect +
+  /// validate) is wired through the same `abort()` API, but its
+  /// cancellation behavior is already covered by the per-hook tests
+  /// above — here we only need to verify the outer machine routes
+  /// the abort correctly while waiting on /clarify.
+  it("aborts during clarify and lands in `cancelled`", async () => {
+    const { result } = renderHook(() =>
+      useGenerateSection("sec_1", "openai"),
+    );
+
+    let startPromise: Promise<unknown>;
+    act(() => {
+      startPromise = result.current.start("focus on methodology");
+    });
+
+    await waitFor(() => expect(result.current.state.status).toBe("clarifying"));
+
+    act(() => {
+      result.current.abort();
+    });
+
+    await startPromise!;
+    await waitFor(() =>
+      expect(result.current.state.status).toBe("cancelled"),
+    );
+    expect(result.current.state.error).toBeNull();
+  });
+
+  /// `skipClarify` (used by the batch runner) must not pop a clarify
+  /// dialog. We verify by asserting the hook never enters `clarifying`
+  /// — it should jump straight to `streaming` (where the fake fetch
+  /// will hang on the SSE call until we abort).
+  it("with skipClarify=true never enters clarifying", async () => {
+    const { result } = renderHook(() =>
+      useGenerateSection("sec_1", "openai", { skipClarify: true }),
+    );
+
+    let startPromise: Promise<unknown>;
+    act(() => {
+      startPromise = result.current.start("");
+    });
+
+    await waitFor(() => expect(result.current.state.status).toBe("streaming"));
+    expect(result.current.state.status).not.toBe("clarifying");
+
+    act(() => {
+      result.current.abort();
+    });
+
+    await startPromise!;
+    await waitFor(() =>
+      expect(result.current.state.status).toBe("cancelled"),
+    );
   });
 });
 

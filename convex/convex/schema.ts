@@ -91,7 +91,13 @@ export default defineSchema({
     .index("by_section", ["sectionId"]),
 
   matchExcerpts: defineTable({
-    matchId: v.id("paperSectionMatches"),
+    /// Optional. AI-generated excerpts come from a paperSectionMatches row;
+    /// user-added excerpts attached during a self-cite via the @-picker have
+    /// no underlying match record (the user picked the paper directly), so
+    /// this field is omitted in that case. The footnote-renderer matches by
+    /// `paperId + page`, not by `matchId`, so absence of `matchId` does not
+    /// affect rendering.
+    matchId: v.optional(v.id("paperSectionMatches")),
     paperId: v.id("papers"),
     sectionId: v.id("outlineSections"),
     excerptText: v.string(),

@@ -298,7 +298,11 @@ export const removeMatch = mutation({
 
 export const addExcerpt = mutation({
   args: {
-    matchId: v.id("paperSectionMatches"),
+    /// Optional. When the excerpt is attached during a self-cite via the
+    /// @-picker, the user has selected a paper directly without going through
+    /// AI matching, so there is no underlying match record yet. Order index
+    /// is then computed across the (paperId, sectionId) tuple instead.
+    matchId: v.optional(v.id("paperSectionMatches")),
     paperId: v.id("papers"),
     sectionId: v.id("outlineSections"),
     excerptText: v.string(),
@@ -306,10 +310,20 @@ export const addExcerpt = mutation({
     pageNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("matchExcerpts")
-      .withIndex("by_match", (q: any) => q.eq("matchId", args.matchId))
-      .collect();
+    // When a match exists, scope ordering by match (preserves AI excerpt
+    // ordering); otherwise scope by paper+section so user-added self-cite
+    // excerpts sit with their siblings rather than colliding with order 0.
+    const existing = args.matchId
+      ? await ctx.db
+          .query("matchExcerpts")
+          .withIndex("by_match", (q: any) => q.eq("matchId", args.matchId))
+          .collect()
+      : await ctx.db
+          .query("matchExcerpts")
+          .withIndex("by_paper_section", (q: any) =>
+            q.eq("paperId", args.paperId).eq("sectionId", args.sectionId)
+          )
+          .collect();
     const maxOrder =
       existing.length > 0
         ? Math.max(...existing.map((e) => e.orderIndex))

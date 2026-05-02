@@ -1,4 +1,9 @@
-import type { CitationType, FootnoteEntry, ParsedCitation } from "./types";
+import type {
+  CitationOrigin,
+  CitationType,
+  FootnoteEntry,
+  ParsedCitation,
+} from "./types";
 import type { Doc } from "../../convex/_generated/dataModel";
 
 // ── Regex patterns for HKA footnote citation markers ───────────────────
@@ -49,11 +54,34 @@ export function parseCitations(body: string): ParsedCitation[] {
   return results;
 }
 
+/// Strips an optional trailing `::origin:ai|user` segment from a marker's inner
+/// body and returns the parsed origin. Markers without the segment default to
+/// `user` so legacy data round-trips unchanged.
+///
+/// Operates on the inner content (between `{{` and `}}`) to keep the logic
+/// orthogonal to the primary/secondary regexes — neither regex tolerates an
+/// extra `::origin:...` tail directly because their last group is greedy.
+function splitOriginSuffix(inner: string): {
+  body: string;
+  origin: CitationOrigin;
+} {
+  const m = inner.match(/^(.*)::origin:(ai|user)$/);
+  if (!m) return { body: inner, origin: "user" };
+  return { body: m[1], origin: m[2] as CitationOrigin };
+}
+
 /// Parses a single {{cite:...}} marker string into structured data.
 function parseSingleMarker(marker: string): ParsedCitation | null {
+  // Strip the outer braces so we can detach an optional origin suffix before
+  // running the legacy regexes (which would otherwise swallow the suffix into
+  // the last greedy capture group).
+  const inner = marker.slice(2, -2);
+  const { body, origin } = splitOriginSuffix(inner);
+  const stripped = `{{${body}}}`;
+
   // Try secondary format first (it's more specific)
   const secRe = new RegExp(CITE_SECONDARY_REGEX.source);
-  const secMatch = secRe.exec(marker);
+  const secMatch = secRe.exec(stripped);
   if (secMatch) {
     return {
       fullMatch: marker,
@@ -62,18 +90,20 @@ function parseSingleMarker(marker: string): ParsedCitation | null {
       pageRef: secMatch[3],
       secondaryPaperId: secMatch[4],
       secondaryPageRef: secMatch[5],
+      origin,
     };
   }
 
   // Try primary format
   const priRe = new RegExp(CITE_REGEX.source);
-  const priMatch = priRe.exec(marker);
+  const priMatch = priRe.exec(stripped);
   if (priMatch) {
     return {
       fullMatch: marker,
       paperId: priMatch[1],
       citationType: priMatch[2] as CitationType,
       pageRef: priMatch[3],
+      origin,
     };
   }
 
@@ -91,7 +121,74 @@ export function extractCitationIds(body: string): string[] {
   return [...ids];
 }
 
+/// A previously-entered citation, deduped by `(citationType, pageRef, secondaryPaperId, secondaryPageRef)`
+/// across all section bodies for a given paperId. Surfaced in the citation
+/// picker so the user can reuse a prior citation instead of retyping it.
+export interface ExistingCitation {
+  citationType: CitationType;
+  pageRef: string;
+  secondaryPaperId?: string;
+  secondaryPageRef?: string;
+}
+
+/// Collects unique `ExistingCitation`s referencing `paperId` from a list of
+/// section bodies. Dedupe key intentionally excludes excerpt text — different
+/// uses can quote different passages on the same page; we present the tuple
+/// itself for selection and let the user re-enter excerpt as needed.
+export function collectExistingCitations(
+  bodies: string[],
+  paperId: string,
+): ExistingCitation[] {
+  const seen = new Set<string>();
+  const out: ExistingCitation[] = [];
+  for (const body of bodies) {
+    for (const c of parseCitations(body)) {
+      if (c.paperId !== paperId) continue;
+      const key = `${c.citationType}|${c.pageRef}|${c.secondaryPaperId ?? ""}|${c.secondaryPageRef ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        citationType: c.citationType,
+        pageRef: c.pageRef,
+        secondaryPaperId: c.secondaryPaperId,
+        secondaryPageRef: c.secondaryPageRef,
+      });
+    }
+  }
+  return out;
+}
+
 // ── Marker insertion ───────────────────────────────────────────────────
+
+/// Builds a `{{cite:...}}` marker string. Origin segment is **only emitted for
+/// `ai`** — the `user` default is implicit so we don't bloat every body with
+/// redundant `::origin:user` suffixes, and legacy markers continue to round-trip
+/// to `user` via `parseSingleMarker`.
+export function buildCitationMarker(args: {
+  paperId: string;
+  citationType: CitationType;
+  pageRef: string;
+  secondaryPaperId?: string;
+  secondaryPageRef?: string;
+  origin: CitationOrigin;
+}): string {
+  const {
+    paperId,
+    citationType,
+    pageRef,
+    secondaryPaperId,
+    secondaryPageRef,
+    origin,
+  } = args;
+
+  const base =
+    secondaryPaperId && secondaryPageRef
+      ? `cite:${paperId}::${citationType}::${pageRef}::via:${secondaryPaperId}::${secondaryPageRef}`
+      : `cite:${paperId}::${citationType}::${pageRef}`;
+
+  const withOrigin = origin === "ai" ? `${base}::origin:ai` : base;
+  return `{{${withOrigin}}}`;
+}
 
 /// Replaces the @query text at cursorPos with a citation marker.
 /// Returns the updated body string and new cursor position.
@@ -103,15 +200,17 @@ export function insertCitationMarker(
   citationType: CitationType,
   pageRef: string,
   secondaryPaperId?: string,
-  secondaryPageRef?: string
+  secondaryPageRef?: string,
+  origin: CitationOrigin = "user"
 ): { newBody: string; newCursorPos: number } {
-  let marker: string;
-
-  if (secondaryPaperId && secondaryPageRef) {
-    marker = `{{cite:${paperId}::${citationType}::${pageRef}::via:${secondaryPaperId}::${secondaryPageRef}}}`;
-  } else {
-    marker = `{{cite:${paperId}::${citationType}::${pageRef}}}`;
-  }
+  const marker = buildCitationMarker({
+    paperId,
+    citationType,
+    pageRef,
+    secondaryPaperId,
+    secondaryPageRef,
+    origin,
+  });
 
   const before = body.slice(0, atStartPos);
   const after = body.slice(cursorPos);
@@ -141,6 +240,8 @@ export function buildFootnotes(
       pageRef: c.pageRef,
       citationType: c.citationType,
       paperId: c.paperId,
+      origin: c.origin,
+      fullMatch: c.fullMatch,
     };
 
     if (c.secondaryPaperId) {
@@ -153,6 +254,18 @@ export function buildFootnotes(
   }
 
   return footnotes;
+}
+
+/// Walks `body` and ensures every `{{cite:...}}` marker carries an `::origin:ai`
+/// suffix. Markers that already declare an origin (`ai` or `user`) are left
+/// untouched. Used by the AI section-writer to tag streamed prose without
+/// changing the backend prompt format.
+export function tagAiOriginInBody(body: string): string {
+  return body.replace(new RegExp(CITE_ANY_REGEX.source, "g"), (full) => {
+    const inner = full.slice(2, -2);
+    if (/::origin:(ai|user)$/.test(inner)) return full;
+    return `{{${inner}::origin:ai}}`;
+  });
 }
 
 /// Formats a single footnote entry as text per HKA rules.
@@ -570,4 +683,68 @@ export function decodeReason(encoded: string): string {
 /// Builds a `{{citeNeeded:<id>::<encodedReason>}}` marker from raw inputs.
 export function buildPendingMarker(id: string, reason: string): string {
   return `{{citeNeeded:${id}::${encodeReason(reason)}}}`;
+}
+
+// ── Highlight-to-cite helpers ──────────────────────────────────────────
+
+/// Maximum length of `paragraphText` returned by `extractEnclosingParagraph`.
+/// Beyond this we truncate symmetrically around the selection so the LLM
+/// payload stays bounded even when the user writes one giant block.
+const MAX_PARAGRAPH_TEXT_LEN = 4000;
+
+/// Extracts the enclosing paragraph(s) for a selection in `body`. Paragraphs
+/// are split on blank lines (`\n\n`); a multi-paragraph selection returns the
+/// union spanning from the start of the first touched paragraph to the end of
+/// the last. Long results are truncated symmetrically around the selection.
+///
+/// Returned offsets reference the *original* `body`, not the (possibly
+/// truncated) text. Callers send `text` to the LLM and use `start`/`end` only
+/// for UI debugging.
+export function extractEnclosingParagraph(
+  body: string,
+  start: number,
+  end: number
+): { text: string; start: number; end: number } {
+  const len = body.length;
+  const safeStart = Math.max(0, Math.min(start, len));
+  const safeEnd = Math.max(safeStart, Math.min(end, len));
+
+  // Walk back to the previous blank line (or 0).
+  let pStart = 0;
+  const before = body.lastIndexOf("\n\n", Math.max(0, safeStart - 1));
+  if (before !== -1) pStart = before + 2;
+
+  // Walk forward to the next blank line (or end).
+  let pEnd = len;
+  const after = body.indexOf("\n\n", safeEnd);
+  if (after !== -1) pEnd = after;
+
+  const fullText = body.slice(pStart, pEnd);
+  if (fullText.length <= MAX_PARAGRAPH_TEXT_LEN) {
+    return { text: fullText, start: pStart, end: pEnd };
+  }
+
+  // Symmetric truncation around the selection. Anchor on the selection center
+  // so both edges of the paragraph collapse evenly when the block is huge.
+  const selCenter = Math.floor((safeStart + safeEnd) / 2) - pStart;
+  const half = Math.floor(MAX_PARAGRAPH_TEXT_LEN / 2);
+  const sliceStart = Math.max(0, selCenter - half);
+  const sliceEnd = Math.min(fullText.length, sliceStart + MAX_PARAGRAPH_TEXT_LEN);
+  return {
+    text: fullText.slice(sliceStart, sliceEnd),
+    start: pStart + sliceStart,
+    end: pStart + sliceEnd,
+  };
+}
+
+/// Returns the offset where a citation marker should be spliced for the
+/// highlight-to-cite flow. Currently always returns `selectionEnd` — the
+/// marker lands directly after the selection regardless of punctuation. The
+/// helper exists so future locale-specific tweaks (e.g. German closing quote
+/// `"` should pull the marker before the quote) live in one place.
+export function computeInsertPos(
+  _body: string,
+  selectionEnd: number
+): number {
+  return selectionEnd;
 }

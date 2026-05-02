@@ -155,7 +155,9 @@
     "secondarySource": "Secondary source",
     "selectSource": "Select source...",
     "noMoreSources": "No more sources available.",
-    "insert": "Insert"
+    "insert": "Insert",
+    "reuseExisting": "Reuse existing",
+    "reuseExcerpt": "Reuse a supporting excerpt"
   },
 
   "zoteroImport": {
@@ -348,7 +350,8 @@
       "error": "AI run failed. Please try again."
     },
     "expandCard": "Expand paper details",
-    "collapseCard": "Collapse paper details"
+    "collapseCard": "Collapse paper details",
+    "viewPdf": "View PDF"
   },
 
   "outlineEditor": {

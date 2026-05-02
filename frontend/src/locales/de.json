@@ -155,7 +155,9 @@
     "secondarySource": "Sekundärquelle",
     "selectSource": "Quelle auswählen…",
     "noMoreSources": "Keine weiteren Quellen verfügbar.",
-    "insert": "Einfügen"
+    "insert": "Einfügen",
+    "reuseExisting": "Vorhandene Zitation übernehmen",
+    "reuseExcerpt": "Vorhandenes Exzerpt übernehmen"
   },
 
   "zoteroImport": {
@@ -348,7 +350,8 @@
       "error": "KI-Lauf fehlgeschlagen. Bitte erneut versuchen."
     },
     "expandCard": "Details einblenden",
-    "collapseCard": "Details ausblenden"
+    "collapseCard": "Details ausblenden",
+    "viewPdf": "PDF ansehen"
   },
 
   "outlineEditor": {

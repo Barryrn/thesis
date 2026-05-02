@@ -102,7 +102,8 @@ export interface PaperSectionAssignment {
 
 export interface MatchExcerpt {
   _id: Id<"matchExcerpts">;
-  matchId: Id<"paperSectionMatches">;
+  /// Optional — user-added self-cite excerpts are not bound to a match row.
+  matchId?: Id<"paperSectionMatches">;
   paperId: PaperId;
   sectionId: SectionId;
   excerptText: string;
@@ -125,6 +126,11 @@ export type SourceType =
 /// Whether a citation is a direct (wörtliches) or indirect (sinngemäßes) quote.
 export type CitationType = "direct" | "indirect";
 
+/// Who inserted a citation. AI-inserted citations carry an explicit `::origin:ai`
+/// suffix in the marker; everything else (manual @-picker inserts and any legacy
+/// markers without an origin segment) is treated as `user`.
+export type CitationOrigin = "ai" | "user";
+
 export type Source = Doc<"sources">;
 export type SourceId = Id<"sources">;
 
@@ -137,6 +143,9 @@ export interface ParsedCitation {
   /// Present only for secondary source citations ("zitiert nach").
   secondaryPaperId?: string;
   secondaryPageRef?: string;
+  /// Who inserted this citation. Defaults to "user" for legacy markers without
+  /// an explicit `::origin:...` segment.
+  origin: CitationOrigin;
 }
 
 /// One pending placeholder cached on `sectionContent.pendingCitations`.
@@ -165,6 +174,12 @@ export interface FootnoteEntry {
   /// Present only for secondary source footnotes.
   secondaryKuerzel?: string;
   secondaryPageRef?: string;
+  /// Mirrors the citation marker's origin so the footnote row can be tinted
+  /// to match the in-body chip (AI vs user).
+  origin: CitationOrigin;
+  /// The exact marker string from the body. Used to scroll to / highlight
+  /// the matching `<sup>` chip when the user clicks this footnote row.
+  fullMatch: string;
 }
 
 // ===== ZOTERO IMPORT =====

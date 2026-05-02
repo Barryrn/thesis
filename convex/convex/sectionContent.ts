@@ -30,6 +30,42 @@ export const getSectionContent = query({
   },
 });
 
+/// Bulk variant of `getSectionContent` for surfaces that need to inspect
+/// the body field across many sections at once (e.g. the batch
+/// section-writer panel deciding which subtree nodes to skip based on
+/// whether they already have content). Returns one entry per requested
+/// id; missing rows are returned as null so the caller can index by
+/// position. Avoids N round-trips when the subtree is large.
+export const getSectionContentBatch = query({
+  args: { sectionIds: v.array(v.id("outlineSections")) },
+  handler: async (ctx, args) => {
+    const out: ({ sectionId: string; body: string } | null)[] = [];
+    for (const sectionId of args.sectionIds) {
+      const row = await ctx.db
+        .query("sectionContent")
+        .withIndex("by_section", (q) => q.eq("sectionId", sectionId))
+        .first();
+      out.push(
+        row ? { sectionId: sectionId as unknown as string, body: row.body } : null
+      );
+    }
+    return out;
+  },
+});
+
+/// Returns the body of every authored section. The citation picker uses this
+/// to surface previously-entered (paperId, type, pageRef) tuples so the user
+/// can reuse an existing citation instead of retyping its details. Parsing
+/// stays on the client to share the canonical regexes in `citationUtils.ts`
+/// — the server only ships raw bodies.
+export const listAllSectionBodies = query({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("sectionContent").collect();
+    return rows.map((r) => ({ sectionId: r.sectionId, body: r.body }));
+  },
+});
+
 /// Bundles everything the section-writer needs to draft prose for a section
 /// in a single round-trip. Intended for the Python /clarify and
 /// /generate-section endpoints — they should not have to chain multiple

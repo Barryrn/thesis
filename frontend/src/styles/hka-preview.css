@@ -329,6 +329,60 @@
   font-weight: 500;
 }
 
+/* AI-inserted citations get a soft violet tint so the user can tell at a
+ * glance which `<sup>N</sup>` chips were placed by the AI section-writer /
+ * validate auto-promote vs. their own @-picker inserts. Hue is intentionally
+ * distinct from amber (user-chip default) and yellow (pending placeholder). */
+.ce-citation--ai {
+  background: rgba(124, 58, 237, 0.10);
+  border-radius: 3px;
+  padding: 0 2px;
+  transition: background 120ms ease-out;
+}
+
+.ce-citation--ai sup {
+  color: #6d28d9;
+}
+
+/* Strong outline applied to the matching chip(s) when the user clicks a
+ * footnote row (or a chip itself). Survives across both user and AI tints. */
+.ce-citation--selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+  background: rgba(37, 99, 235, 0.18);
+  border-radius: 3px;
+}
+
+/* Soft tint applied to the enclosing block (paragraph / heading / list item)
+ * of any selected chip so the user can see *which paragraph* a footnote
+ * belongs to without losing scroll context. */
+.ce-paragraph--selected {
+  background: rgba(37, 99, 235, 0.06);
+  border-left: 2px solid rgba(37, 99, 235, 0.5);
+  padding-left: 6px;
+  border-radius: 2px;
+  transition: background 120ms ease-out;
+}
+
+/* Footnote-row counterpart of `.ce-citation--selected`. Same accent so the
+ * eye traces the body→footnote (and reverse) correspondence instantly. */
+.ce-footnote--selected {
+  background: rgba(37, 99, 235, 0.10);
+  border-left: 3px solid #2563eb;
+  padding-left: 6px;
+  border-radius: 2px;
+}
+
+/* Mirror the AI body-tint on the matching footnote `<li>` so a reviewer
+ * can scan the footnote list and see at a glance which entries came from
+ * the AI pipeline. */
+.ce-footnote--ai {
+  background: rgba(124, 58, 237, 0.06);
+  border-left: 2px solid rgba(124, 58, 237, 0.4);
+  padding-left: 6px;
+  border-radius: 2px;
+}
+
 .ce-formula-display {
   display: block;
   text-align: center;

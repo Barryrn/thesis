@@ -472,6 +472,7 @@ async def cite(req: CiteRequest):
                 paper_text,
                 language=cite_language,
                 provider=req.provider,
+                single_section_mode=True,
             )
             matched = [s for s in scores if s["score"] > 0.0]
             logger.info(
@@ -692,6 +693,11 @@ class GenerateSectionRequest(BaseModel):
     guidance: str | None = None
     answers: list[AnswerPair] = []
     provider: str = "anthropic"
+    # Two-pass is the default: write prose first, attach citations in a
+    # follow-up detect+validate pass on the client. Setting this True
+    # selects the legacy one-pass mode where the model emits {{cite:...}}
+    # markers inline as it writes.
+    cite_inline: bool = False
 
 
 @app.post("/clarify")
@@ -791,6 +797,7 @@ async def generate_section(req: GenerateSectionRequest):
                 payload,
                 req.guidance,
                 [a.model_dump() for a in req.answers],
+                cite_inline=req.cite_inline,
             )
 
             allowed_ids = [m["paperId"] for m in payload.get("matches") or []]
@@ -832,9 +839,21 @@ async def generate_section(req: GenerateSectionRequest):
                 yield emit("token", {"delta": chunk})
 
             full_text = "".join(full_chunks)
-            cleaned, warnings = section_writer.validate_citation_markers(
-                full_text, allowed_ids, allowed_pages
-            )
+            if req.cite_inline:
+                cleaned, warnings = section_writer.validate_citation_markers(
+                    full_text, allowed_ids, allowed_pages
+                )
+            else:
+                # Two-pass mode: prompt forbids citations, but strip any
+                # leakage so the downstream detect pass sees clean prose.
+                cleaned, leaked = section_writer.strip_all_citation_markers(
+                    full_text
+                )
+                warnings = (
+                    [f"Stripped {leaked} stray citation markers from draft."]
+                    if leaked
+                    else []
+                )
             yield emit("done", {"fullText": cleaned, "warnings": warnings})
             logger.info(
                 f"Generate-section completed: chars={len(cleaned)}, "

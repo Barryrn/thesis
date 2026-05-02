@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { toast } from "sonner";
 import { api } from "../../convex/_generated/api";
-import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2, Compass, MessageCircleQuestion, Eraser, Square } from "lucide-react";
+import { Check, Loader2, Sparkles, GraduationCap, Feather, Maximize2, X, Sigma, Settings2, Wand2, Compass, MessageCircleQuestion, Eraser, Square, Quote } from "lucide-react";
 import CitationPicker from "./CitationPicker";
+import HighlightCitationPopover, { type FindCiteScope } from "./HighlightCitationPopover";
 import SectionPromptEditor from "./SectionPromptEditor";
 import FormulaPreviewPanel from "./FormulaPreviewPanel";
 import FigurePanel from "./FigurePanel";
@@ -15,6 +16,7 @@ import SectionTodoPanel from "./SectionTodoPanel";
 import {
   extractCitationIds,
   insertCitationMarker,
+  buildCitationMarker,
   getAtTriggerContext,
   buildFootnotes,
   renderFootnoteText,
@@ -23,6 +25,9 @@ import {
   extractPendingPlaceholderIds,
   replacePendingMarker,
   stripAllPendingMarkers,
+  stripCitationMarkers,
+  extractEnclosingParagraph,
+  computeInsertPos,
 } from "@/lib/citationUtils";
 import { useDetectCitations } from "@/hooks/useDetectCitations";
 import { useValidateCitations, type ValidateResult } from "@/hooks/useValidateCitations";
@@ -33,6 +38,7 @@ import {
   decoratedDomToRawText,
   getCaretOffsetInRawText,
   setCaretFromRawTextOffset,
+  setSelectionRangeFromRawTextOffsets,
   getCaretPixelPosition,
   getSelectionRangeInRawText,
 } from "@/lib/contentEditableUtils";
@@ -45,7 +51,7 @@ import { useBaselinePrompts } from "@/hooks/useBaselinePrompts";
 import { resolvePrompt } from "@/lib/promptResolver";
 import { useLanguage } from "@/lib/LanguageContext";
 import { useProvider } from "@/lib/ProviderContext";
-import type { ActiveSection, CitationType, OptimizeMode, AiPromptSettingsByLang, AiPromptOverridesByLang } from "@/lib/types";
+import type { ActiveSection, CitationType, OptimizeMode, AiPromptSettingsByLang, AiPromptOverridesByLang, CitationRecommendation, GroupId, PaperId } from "@/lib/types";
 import "katex/dist/katex.min.css";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 
@@ -166,6 +172,51 @@ export default function SectionWriteEditor({
   const [pickerQuery, setPickerQuery] = useState("");
   const [pickerStartPos, setPickerStartPos] = useState(0);
   const [pickerAnchor, setPickerAnchor] = useState({ top: 0, left: 0 });
+  /// PaperId preselected for the picker via the highlight-to-cite flow.
+  /// When non-null, the picker skips Stage 1 and jumps to Stage 2.
+  const [pickerInitialPaperId, setPickerInitialPaperId] = useState<
+    string | null
+  >(null);
+  /// Forces `handleCitationSelect` to insert at this offset instead of the
+  /// caret/atStartPos. Set by the highlight-to-cite flow so the marker lands
+  /// at the end of the selection rather than at the cursor.
+  const [forcedInsertPos, setForcedInsertPos] = useState<number | null>(null);
+
+  // ── Highlight-to-cite popover state ──────────────────────────────────
+  const [findCiteOpen, setFindCiteOpen] = useState(false);
+  const [findCiteScope, setFindCiteScope] = useState<FindCiteScope>({
+    type: "section",
+  });
+  const [findCiteResults, setFindCiteResults] = useState<
+    CitationRecommendation[] | null
+  >(null);
+  const [findCiteExcluded, setFindCiteExcluded] = useState<
+    { paperId: PaperId; reason: "no-summary" }[]
+  >([]);
+  const [findCiteLoading, setFindCiteLoading] = useState(false);
+  const [findCiteLowContext, setFindCiteLowContext] = useState(false);
+  const [findCiteAnchor, setFindCiteAnchor] = useState({ top: 0, left: 0 });
+  /// Snapshot of the selection at the moment the popover opened. Tracking it
+  /// separately from `selection` means the user can click around inside the
+  /// popover (which collapses the selection) without losing the insert target.
+  const [findCiteSelection, setFindCiteSelection] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
+  /// Counter used to discard stale recommendation results when the user
+  /// re-highlights / re-runs while a request is in flight.
+  const findCiteRequestIdRef = useRef(0);
+
+  // Convex action handle for the highlight-to-cite recommender.
+  const recommendForSelection = useAction(
+    api.recommendations.recommendForSelection
+  );
+  // Mutation used to ensure a chosen paper is linked to the section before
+  // we hand off to CitationPicker Stage 2 — Stage 2 reads from `matches`.
+  const addMatchMutation = useMutation(api.matches.addMatch);
+  // Group list for the popover's group dropdown. Reactive — new groups show
+  // up automatically without reopening the popover.
+  const availableGroups = useQuery(api.groups.listGroups) ?? [];
 
   // Refs
   const editorRef = useRef<HTMLDivElement>(null);
@@ -197,6 +248,10 @@ export default function SectionWriteEditor({
   // Note: Convex queries are reactive, so this updates automatically.
   const allSources = useQuery(api.sources.listAllSources) ?? [];
   const createSource = useMutation(api.sources.createSource);
+  /// Persists user-entered cited passages from the @-picker into the
+  /// matchExcerpts table so the footnote panel can render them under the
+  /// matching footnote (auto-matched by paperId + page).
+  const addExcerptMutation = useMutation(api.matches.addExcerpt);
 
   const sourceMap = useMemo(() => {
     const map = new Map<string, Doc<"sources">>();
@@ -331,6 +386,20 @@ export default function SectionWriteEditor({
 
     const html = rawTextToDecoratedHtml(body, sourceMap);
     editor.innerHTML = html;
+    // Strip stray <br> / empty <div> blocks at both ends.
+    // - Trailing: browsers auto-insert a caret-landing block into any
+    //   contentEditable, which on the next serialization round-trips as an
+    //   extra newline at the end of the saved body.
+    // - Leading: existing bodies in the DB may have a leading "\n" baked in
+    //   from a past serialization bug; without stripping it here the user
+    //   sees a permanent blank first line above the real content.
+    const isEmptyBlock = (n: ChildNode | null): n is HTMLElement =>
+      n instanceof HTMLBRElement ||
+      (n instanceof HTMLDivElement &&
+        (n.childNodes.length === 0 ||
+          (n.childNodes.length === 1 && n.firstChild instanceof HTMLBRElement)));
+    while (isEmptyBlock(editor.firstChild)) editor.firstChild!.remove();
+    while (isEmptyBlock(editor.lastChild)) editor.lastChild!.remove();
     lastRenderedBodyRef.current = body;
   }, [body, sourceMap]);
 
@@ -518,24 +587,102 @@ export default function SectionWriteEditor({
     [sourceMap]
   );
 
+  // ── Helper: undoable full re-render via execCommand ──────────────────
+  /// Like `rerenderEditor`, but issues the swap through
+  /// `document.execCommand("insertHTML", …)` so the change is recorded as a
+  /// single step in the browser's native undo stack. Used by single-action
+  /// user edits (citation insert / pending-marker resolve) so Cmd+Z reverts
+  /// the marker. Returns `true` on success; the caller falls back to
+  /// `rerenderEditor` when the command isn't available (e.g. in JSDOM tests
+  /// or environments where `execCommand` is disabled).
+  const rerenderEditorUndoable = useCallback(
+    (newBody: string, caretOffset: number): boolean => {
+      const editor = editorRef.current;
+      if (!editor) return false;
+
+      // execCommand requires the editor to be the active element so that the
+      // current selection lives inside it.
+      editor.focus();
+
+      // Select the entire editor contents in raw-text terms. The existing body
+      // length is derived from the live DOM so the selection is correct even
+      // if React state has lagged behind the user's keystrokes.
+      const liveLen = decoratedDomToRawText(editor).length;
+      const selected = setSelectionRangeFromRawTextOffsets(editor, 0, liveLen);
+      if (!selected) return false;
+
+      const html = rawTextToDecoratedHtml(newBody, sourceMap);
+      let ok = false;
+      try {
+        ok = document.execCommand("insertHTML", false, html);
+      } catch {
+        ok = false;
+      }
+      if (!ok) return false;
+
+      // Trust the DOM that execCommand just produced as the rendered state so
+      // the [body, sourceMap] effect doesn't re-paint and clobber undo.
+      lastRenderedBodyRef.current = newBody;
+
+      requestAnimationFrame(() => {
+        const el = editorRef.current;
+        if (!el) return;
+        try {
+          setCaretFromRawTextOffset(el, Math.min(caretOffset, newBody.length));
+        } catch {
+          // Fallback: leave caret where insertHTML parked it.
+        }
+      });
+      return true;
+    },
+    [sourceMap]
+  );
+
   // ── Citation selection ────────────────────────────────────────────────
-  /// Handles the completed citation picker flow: paper + type + page ref.
+  /// Handles the completed citation picker flow: paper + type + page ref +
+  /// optional excerpt. Inserts the marker into the body and (when an excerpt
+  /// was provided) persists it via `addExcerpt` so the footnote panel can
+  /// render the cited passage alongside AI-generated excerpts. Excerpt
+  /// persistence is fire-and-forget — a failure here doesn't block the
+  /// in-body marker from being saved.
   const handleCitationSelect = useCallback(
     (
       paperId: string,
       citationType: CitationType,
       pageRef: string,
       secondaryPaperId?: string,
-      secondaryPageRef?: string
+      secondaryPageRef?: string,
+      excerptText?: string
     ) => {
       const editor = editorRef.current;
       if (!editor) return;
 
-      const cursorPos = getCaretOffsetInRawText(editor);
+      // Always derive the body from the live DOM rather than React's `body`
+      // state. `setBody` is async; if the user types and immediately picks a
+      // citation result, the closure still holds the pre-keystroke body and
+      // would silently drop the freshly-typed text on insert.
+      const liveBody = decoratedDomToRawText(editor);
+
+      // Highlight-to-cite flow forces the insertion offset so the marker lands
+      // after the selection instead of at the caret. Otherwise we use the
+      // existing @-trigger range (atStart..end-of-query).
+      const insertStart =
+        forcedInsertPos !== null ? forcedInsertPos : pickerStartPos;
+      // The end of the @-query span is `pickerStartPos + 1 + pickerQuery.length`
+      // (1 for the "@" itself). DO NOT fall back to `cursorPos` or
+      // `liveBody.length`: by the time the picker fires `onSelect`, focus has
+      // moved into the picker's Stage 2 inputs and the editor's selection is
+      // gone. `getCaretOffsetInRawText` would return -1 and a `liveBody.length`
+      // fallback would delete every character after the "@" — which is exactly
+      // the "text after the citation vanishes" bug. The query length is kept
+      // in sync by `handleInput` on every keystroke, so it's always current.
+      const queryEnd = pickerStartPos + 1 + pickerQuery.length;
+      const insertEnd =
+        forcedInsertPos !== null ? forcedInsertPos : queryEnd;
       const { newBody, newCursorPos } = insertCitationMarker(
-        body,
-        pickerStartPos,
-        cursorPos >= 0 ? cursorPos : body.length,
+        liveBody,
+        insertStart,
+        insertEnd,
         paperId,
         citationType,
         pageRef,
@@ -545,11 +692,198 @@ export default function SectionWriteEditor({
 
       setBody(newBody);
       setPickerOpen(false);
+      // Reset the highlight-to-cite handoff state so subsequent @-picker uses
+      // are not contaminated by a stale forced-insert offset.
+      setForcedInsertPos(null);
+      setPickerInitialPaperId(null);
       scheduleSave(newBody);
-      rerenderEditor(newBody, newCursorPos);
+      // Prefer the undoable path so Cmd+Z rolls the marker back. Fall back to
+      // the destructive innerHTML rerender when execCommand is unavailable
+      // (e.g. older browsers or test environments).
+      if (!rerenderEditorUndoable(newBody, newCursorPos)) {
+        rerenderEditor(newBody, newCursorPos);
+      }
+
+      const trimmedExcerpt = excerptText?.trim();
+      if (trimmedExcerpt) {
+        // Use the same first-integer heuristic the footnote renderer uses
+        // (`firstPageNumber`) so the new excerpt automatically surfaces
+        // under the matching footnote without needing an explicit join id.
+        const pageDigits = pageRef.match(/\d+/)?.[0];
+        addExcerptMutation({
+          paperId: paperId as Id<"papers">,
+          sectionId: sectionId as Id<"outlineSections">,
+          excerptText: trimmedExcerpt,
+          relevanceNote: "",
+          pageNumber: pageDigits ?? pageRef,
+        }).catch((err: unknown) => {
+          console.error("[citation] failed to persist self-cite excerpt", err);
+        });
+      }
     },
-    [body, pickerStartPos, scheduleSave, rerenderEditor]
+    [
+      pickerStartPos,
+      pickerQuery,
+      forcedInsertPos,
+      scheduleSave,
+      rerenderEditor,
+      rerenderEditorUndoable,
+      sectionId,
+      addExcerptMutation,
+    ]
   );
+
+  // ── Highlight-to-cite handlers ─────────────────────────────────────────
+  /// Runs the recommender for the current selection under the given scope.
+  /// Stale-response guard: each call increments the request id and only the
+  /// most recent response is allowed to update state.
+  const runFindCitation = useCallback(
+    async (
+      sel: { start: number; end: number },
+      scope: FindCiteScope,
+      currentBody: string
+    ) => {
+      const rawSelection = currentBody.slice(sel.start, sel.end);
+      const selectionText = stripCitationMarkers(rawSelection);
+      const para = extractEnclosingParagraph(currentBody, sel.start, sel.end);
+      const paragraphText = stripCitationMarkers(para.text);
+
+      findCiteRequestIdRef.current += 1;
+      const requestId = findCiteRequestIdRef.current;
+      setFindCiteLoading(true);
+      setFindCiteResults(null);
+      setFindCiteExcluded([]);
+      setFindCiteLowContext(false);
+
+      try {
+        const scopeArg =
+          scope.type === "group"
+            ? { type: "group" as const, groupId: scope.groupId }
+            : scope.type === "section"
+              ? { type: "section" as const }
+              : { type: "all" as const };
+        const result = await recommendForSelection({
+          sectionId,
+          selectionText,
+          paragraphText,
+          scope: scopeArg,
+          provider,
+          language,
+        });
+        // Drop the result if a newer request has been issued.
+        if (requestId !== findCiteRequestIdRef.current) return;
+        // The action returns `paperId: string`; the UI type uses the branded
+        // `PaperId`. They wire-encode identically — cast through `unknown`
+        // to satisfy the structural check.
+        setFindCiteResults(
+          result.recommendations as unknown as CitationRecommendation[]
+        );
+        setFindCiteExcluded(
+          (result.excluded ?? []) as { paperId: PaperId; reason: "no-summary" }[]
+        );
+        setFindCiteLowContext(result.lowContext);
+      } catch (err) {
+        if (requestId !== findCiteRequestIdRef.current) return;
+        console.error("[findCitation] failed:", err);
+        toast.error(
+          t("findCitation.errorToast", "Recommendation request failed")
+        );
+        setFindCiteResults([]);
+      } finally {
+        if (requestId === findCiteRequestIdRef.current) {
+          setFindCiteLoading(false);
+        }
+      }
+    },
+    [recommendForSelection, sectionId, provider, language, t]
+  );
+
+  /// Click handler for the new "Find citation" toolbar pill. Captures the
+  /// selection, opens the popover anchored to the editor selection, and kicks
+  /// off the first recommendation request.
+  const handleFindCitation = useCallback(() => {
+    if (!selection || selection.start === selection.end) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const anchor = getCaretPixelPosition(editor);
+    setFindCiteAnchor(anchor);
+    setFindCiteSelection({ start: selection.start, end: selection.end });
+    setFindCiteScope({ type: "section" });
+    setFindCiteOpen(true);
+    void runFindCitation(selection, { type: "section" }, body);
+  }, [selection, body, runFindCitation]);
+
+  /// Scope change handler. Re-runs the recommender against the captured
+  /// selection — never the live `selection` state, which may have collapsed
+  /// when the user clicked into the popover.
+  const handleFindCiteScopeChange = useCallback(
+    (next: FindCiteScope) => {
+      setFindCiteScope(next);
+      if (!findCiteSelection) return;
+      void runFindCitation(findCiteSelection, next, body);
+    },
+    [findCiteSelection, body, runFindCitation]
+  );
+
+  /// User picked a paper from the recommender results. Ensures the paper is
+  /// linked to the section (so CitationPicker Stage 2 can render it), wires
+  /// up the forced insertion offset, and opens the picker preselected.
+  const handleFindCitePick = useCallback(
+    async (paperId: PaperId) => {
+      if (!findCiteSelection) return;
+
+      // Idempotently link the paper to the section. `addMatch` upserts based
+      // on (paperId, sectionId), so a no-op when the paper is already linked.
+      try {
+        await addMatchMutation({
+          paperId,
+          sectionId: sectionId as Id<"outlineSections">,
+          // 0.5 is a neutral score; the picker doesn't display it. Manual
+          // inserts elsewhere use the same convention.
+          relevanceScore: 0.5,
+        });
+      } catch (err) {
+        console.error("[findCitation] addMatch failed:", err);
+        toast.error(
+          t("findCitation.addMatchFailed", "Failed to link paper to section")
+        );
+        return;
+      }
+
+      // Read the body off the live DOM rather than the closure-captured
+      // `body` state — same lag-by-a-render hazard as `handleCitationSelect`.
+      // The selection offset must be measured against whatever the user
+      // actually has on screen, not whatever React last committed.
+      const editor = editorRef.current;
+      const liveBody = editor ? decoratedDomToRawText(editor) : "";
+      const insertOffset = computeInsertPos(liveBody, findCiteSelection.end);
+      setForcedInsertPos(insertOffset);
+      setPickerInitialPaperId(paperId);
+      // Re-anchor the picker to the selection's end position so it doesn't
+      // float at the caret (which may be elsewhere by now).
+      setPickerAnchor(findCiteAnchor);
+      setPickerOpen(true);
+
+      // Close the recommendation popover; the picker takes over.
+      setFindCiteOpen(false);
+      setFindCiteResults(null);
+    },
+    [
+      findCiteSelection,
+      addMatchMutation,
+      sectionId,
+      findCiteAnchor,
+      t,
+    ]
+  );
+
+  /// Dismisses the highlight-to-cite popover without inserting anything.
+  const handleFindCiteDismiss = useCallback(() => {
+    setFindCiteOpen(false);
+    setFindCiteResults(null);
+    findCiteRequestIdRef.current += 1; // Invalidate any in-flight request
+  }, []);
 
   // Handle keyboard events for picker navigation
   const handleKeyDown = useCallback(
@@ -711,6 +1045,93 @@ export default function SectionWriteEditor({
     anchor: AnchorRect;
   } | null>(null);
 
+  /// Currently-selected footnote number for body↔footnote highlighting.
+  /// `null` when nothing is selected. A single number can correspond to
+  /// multiple chips in the body (`buildFootnotes` deduplicates by paperId
+  /// + page), so the highlight effect targets *all* matching chips.
+  const [selectedFootnote, setSelectedFootnote] = useState<number | null>(null);
+
+  /// Applies / clears the citation highlight CSS classes whenever the
+  /// selection changes. Touches the contenteditable DOM directly because
+  /// the editor body is rendered via `dangerouslySetInnerHTML` (see
+  /// `rerenderEditor`), not React children — toggling React state alone
+  /// would not reach the chips.
+  ///
+  /// Re-runs on `body` so a re-render that replaces the DOM (e.g. after
+  /// any insertion) re-applies the highlight to the freshly created chips
+  /// at the same index.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    // Always start by clearing any prior highlight classes — the chip and
+    // its enclosing block element are what we touch, plus any footnote
+    // row in the panel below.
+    const clearAll = () => {
+      editor
+        .querySelectorAll(".ce-citation--selected")
+        .forEach((el) => el.classList.remove("ce-citation--selected"));
+      // Paragraph highlights live on ancestors in the contenteditable, so
+      // we have to query the whole document — they're scoped by class name.
+      document
+        .querySelectorAll(".ce-paragraph--selected")
+        .forEach((el) => el.classList.remove("ce-paragraph--selected"));
+      document
+        .querySelectorAll(".ce-footnote--selected")
+        .forEach((el) => el.classList.remove("ce-footnote--selected"));
+    };
+
+    clearAll();
+    if (selectedFootnote === null) return;
+
+    const chips = editor.querySelectorAll<HTMLElement>(".ce-citation");
+    const chip = chips[selectedFootnote - 1];
+    if (chip) {
+      chip.classList.add("ce-citation--selected");
+      // Walk up to the nearest block ancestor (paragraph, heading, list
+      // item) and tint it. Stop at the editor root so we never decorate
+      // unrelated layout containers.
+      let node: HTMLElement | null = chip.parentElement;
+      const blockTags = new Set([
+        "P", "DIV", "LI", "BLOCKQUOTE", "H1", "H2", "H3", "H4", "H5", "H6",
+      ]);
+      while (node && node !== editor) {
+        if (blockTags.has(node.tagName)) {
+          node.classList.add("ce-paragraph--selected");
+          break;
+        }
+        node = node.parentElement;
+      }
+    }
+
+    const footnoteRow = document.querySelector<HTMLElement>(
+      `[data-footnote-number="${selectedFootnote}"]`
+    );
+    if (footnoteRow) {
+      footnoteRow.classList.add("ce-footnote--selected");
+      // Bring it into view if scrolled past — `nearest` so we don't yank
+      // the user's scroll position when the row is already visible.
+      footnoteRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    // Also bring the body chip into view so the user always sees both
+    // sides of the link, no matter which one was clicked.
+    if (chip) {
+      chip.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [selectedFootnote, body]);
+
+  /// Esc clears any active citation highlight. Bound at the document level
+  /// so it works whether the focus is in the editor or on a footnote row.
+  useEffect(() => {
+    if (selectedFootnote === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedFootnote(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedFootnote]);
+
   /// Number of `{{citeNeeded:...}}` chips currently in the body. Drives
   /// the enabled state of the Validate / Clear buttons.
   const pendingCount = useMemo(
@@ -857,31 +1278,62 @@ export default function SectionWriteEditor({
     await flushSave(newBody, sectionIdRef.current);
   }, [body, pendingCount, flushSave, rerenderEditor, t]);
 
-  /// Clicks on a `.ce-cite-needed` chip in the editor. Opens the popover
-  /// anchored to the chip's rect so the user can pick a candidate or
-  /// dismiss the placeholder.
+  /// Clicks inside the editor surface. Two distinct chip types are handled:
+  ///
+  /// 1. `.ce-cite-needed` (yellow pending placeholder) → opens the popover
+  ///    anchored to the chip's rect so the user can pick a candidate or
+  ///    dismiss the placeholder.
+  /// 2. `.ce-citation` (resolved citation) → toggles the body↔footnote
+  ///    selection so the matching footnote row in the panel below highlights
+  ///    and scrolls into view.
+  ///
+  /// Anything else (including plain text) clears the citation selection so
+  /// the highlight doesn't linger after the user moves on.
   const handleEditorClick = useCallback((e: React.MouseEvent) => {
-    const target = (e.target as HTMLElement).closest<HTMLElement>(
-      "[data-placeholder-id]"
-    );
-    if (!target) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const id = target.getAttribute("data-placeholder-id") || "";
-    if (!id) return;
-    const livePending = parsePendingCitations(body);
-    const reason = livePending.find((p) => p.id === id)?.reason ?? "";
-    const rect = target.getBoundingClientRect();
-    setPopoverState({
-      placeholderId: id,
-      reason,
-      anchor: {
-        top: rect.top,
-        left: rect.left,
-        bottom: rect.bottom,
-        width: rect.width,
-      },
-    });
+    const targetEl = e.target as HTMLElement;
+
+    const pendingChip = targetEl.closest<HTMLElement>("[data-placeholder-id]");
+    if (pendingChip) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = pendingChip.getAttribute("data-placeholder-id") || "";
+      if (!id) return;
+      const livePending = parsePendingCitations(body);
+      const reason = livePending.find((p) => p.id === id)?.reason ?? "";
+      const rect = pendingChip.getBoundingClientRect();
+      setPopoverState({
+        placeholderId: id,
+        reason,
+        anchor: {
+          top: rect.top,
+          left: rect.left,
+          bottom: rect.bottom,
+          width: rect.width,
+        },
+      });
+      return;
+    }
+
+    const citationChip = targetEl.closest<HTMLElement>(".ce-citation");
+    if (citationChip && editorRef.current) {
+      // Locate the chip's index among all citation chips — that's the
+      // footnote number (1-based). The decorator and `buildFootnotes`
+      // share the same document-order numbering, so this stays in sync.
+      const allChips = editorRef.current.querySelectorAll(".ce-citation");
+      const idx = Array.from(allChips).indexOf(citationChip);
+      if (idx >= 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        const num = idx + 1;
+        // Toggle off when clicking the already-selected chip.
+        setSelectedFootnote((prev) => (prev === num ? null : num));
+      }
+      return;
+    }
+
+    // Click landed elsewhere in the editor — drop any active citation
+    // highlight so the user gets a clean writing surface.
+    setSelectedFootnote(null);
   }, [body]);
 
   /// Replaces a pending placeholder with a real {{cite:...}} marker.
@@ -894,7 +1346,14 @@ export default function SectionWriteEditor({
     pageRef: string,
   ) => {
     if (!popoverState) return;
-    const marker = `{{cite:${paperId}::${citationType}::${pageRef}}}`;
+    // The candidate set was AI-ranked (validate phase), so even though the
+    // user picks the final paper, the citation itself originates from AI work.
+    const marker = buildCitationMarker({
+      paperId,
+      citationType,
+      pageRef,
+      origin: "ai",
+    });
     const newBody = replacePendingMarker(body, popoverState.placeholderId, marker);
     if (newBody === body) {
       setPopoverState(null);
@@ -1113,6 +1572,23 @@ export default function SectionWriteEditor({
               {label}
             </button>
           ))}
+          {/* Divider before the find-citation pill so the visual grouping
+              (optimize | citation) reflects the functional split. */}
+          <span className="mx-1 h-3 w-px bg-border/50" aria-hidden="true" />
+          {/*
+            "Find citation" — opens the highlight-to-cite popover with the
+            current selection. Disabled when the selection is collapsed (which
+            means there is no text to score against).
+          */}
+          <button
+            onClick={handleFindCitation}
+            disabled={!selection || selection.start === selection.end}
+            className="text-[11px] px-2 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={t("findCitation.toolbarTitle", "Find a citation for this selection")}
+          >
+            <Quote className="size-3" />
+            {t("findCitation.toolbarButton", "Find citation")}
+          </button>
           <button
             onClick={() => setPromptEditorOpen(true)}
             className="text-[11px] px-1.5 py-0.5 rounded-full text-muted-foreground hover:text-amber hover:bg-amber/10 transition-colors ml-1"
@@ -1213,7 +1689,36 @@ export default function SectionWriteEditor({
             query={pickerQuery}
             anchor={pickerAnchor}
             onSelect={handleCitationSelect}
-            onDismiss={() => setPickerOpen(false)}
+            onDismiss={() => {
+              setPickerOpen(false);
+              // Clear the highlight-to-cite handoff if the user dismisses the
+              // picker without inserting — otherwise a later @-trigger would
+              // splice at the stale forced offset.
+              setForcedInsertPos(null);
+              setPickerInitialPaperId(null);
+            }}
+            initialPaperId={pickerInitialPaperId ?? undefined}
+          />
+        )}
+
+        {/* Highlight-to-cite popover. Renders the recommender results for the
+            current text selection so the user can pick a paper to cite without
+            leaving the editor. */}
+        {findCiteOpen && (
+          <HighlightCitationPopover
+            anchor={findCiteAnchor}
+            scope={findCiteScope}
+            onScopeChange={handleFindCiteScopeChange}
+            loading={findCiteLoading}
+            results={findCiteResults}
+            excluded={findCiteExcluded}
+            lowContext={findCiteLowContext}
+            availableGroups={availableGroups.map((g) => ({
+              _id: g._id as GroupId,
+              name: g.name,
+            }))}
+            onPickResult={(paperId) => void handleFindCitePick(paperId)}
+            onDismiss={handleFindCiteDismiss}
           />
         )}
       </div>
@@ -1263,7 +1768,20 @@ export default function SectionWriteEditor({
               return (
                 <li
                   key={fn.number}
-                  className="text-sm text-foreground/80 leading-relaxed"
+                  data-footnote-number={fn.number}
+                  // Clicking a footnote row highlights the matching <sup>
+                  // chip and its enclosing paragraph in the editor above,
+                  // and scrolls both into view. The visual tint comes from
+                  // `.ce-footnote--selected` applied by the highlight
+                  // effect — this handler just owns the state change.
+                  onClick={() =>
+                    setSelectedFootnote((prev) =>
+                      prev === fn.number ? null : fn.number
+                    )
+                  }
+                  className={`text-sm text-foreground/80 leading-relaxed cursor-pointer transition-colors${
+                    fn.origin === "ai" ? " ce-footnote--ai" : ""
+                  }`}
                 >
                   <div>
                     <sup className="text-amber/70 mr-1">{fn.number}</sup>

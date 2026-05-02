@@ -269,3 +269,192 @@ export const recommendPapersForSection = action({
     };
   },
 });
+
+/// Threshold for the selection-mode "low context" banner. Selections shorter
+/// than this don't carry enough signal for the recommender to do useful work.
+const LOW_SELECTION_CHAR_THRESHOLD = 20;
+
+/// Recommend papers for a specific selection inside a section. Powers the
+/// highlight-to-cite flow: the user highlights a sentence and asks "which
+/// paper supports this?". Inputs are the selection text plus its enclosing
+/// paragraph (already stripped of `{{cite:...}}` markers on the client),
+/// scored against the chosen pool — the section's already-matched papers,
+/// a specific group, or every completed paper.
+///
+/// Unlike `recommendPapersForSection`, papers already linked to the section
+/// are NOT excluded — re-citing a paper already in the matches list is the
+/// common case here.
+export const recommendForSelection = action({
+  args: {
+    sectionId: v.id("outlineSections"),
+    /// The highlighted text (cite markers stripped on the client).
+    selectionText: v.string(),
+    /// Enclosing paragraph(s) for additional context. Same stripping rules.
+    paragraphText: v.string(),
+    scope: v.union(
+      v.object({ type: v.literal("section") }),
+      v.object({
+        type: v.literal("group"),
+        groupId: v.id("paperGroups"),
+      }),
+      v.object({ type: v.literal("all") })
+    ),
+    provider: v.optional(v.string()),
+    language: v.optional(v.union(v.literal("en"), v.literal("de"))),
+    fallbackLanguage: v.optional(
+      v.union(v.literal("en"), v.literal("de"))
+    ),
+  },
+  handler: async (ctx, args) => {
+    const provider = args.provider ?? "anthropic";
+    const fallback = args.fallbackLanguage ?? "en";
+
+    const selectionText = args.selectionText.trim();
+    const paragraphText = args.paragraphText.trim();
+    const lowContext =
+      selectionText.length < LOW_SELECTION_CHAR_THRESHOLD;
+
+    // Determine candidate paperIds based on scope.
+    const allPapers = await ctx.runQuery(api.papers.listPapers);
+    const completedById = new Map<string, (typeof allPapers)[number]>();
+    for (const p of allPapers) {
+      if (p.status !== "completed") continue;
+      completedById.set(p._id as string, p);
+    }
+
+    let scopedPaperIds: Set<string>;
+    if (args.scope.type === "section") {
+      const existingMatches = await ctx.runQuery(
+        api.matches.getMatchesBySection,
+        { sectionId: args.sectionId }
+      );
+      scopedPaperIds = new Set(
+        (existingMatches ?? []).map((m: any) => m.paperId as string)
+      );
+    } else if (args.scope.type === "group") {
+      const memberships = await ctx.runQuery(api.groups.listAllMemberships);
+      const groupId = args.scope.groupId as string;
+      scopedPaperIds = new Set(
+        memberships
+          .filter((m: any) => (m.groupId as string) === groupId)
+          .map((m: any) => m.paperId as string)
+      );
+    } else {
+      scopedPaperIds = new Set(completedById.keys());
+    }
+
+    // Build candidates from the scoped pool. Skip papers without summaries —
+    // they have no signal for the recommender — and report them as excluded.
+    const candidates: PaperPayload[] = [];
+    const titleByPaper = new Map<string, { title: string; authors: string[]; year?: number }>();
+    const excluded: { paperId: string; reason: "no-summary" }[] = [];
+
+    for (const pid of scopedPaperIds) {
+      const paper = completedById.get(pid);
+      if (!paper) continue;
+
+      const summary = await ctx.runQuery(api.summaries.getSummaryByPaper, {
+        paperId: paper._id,
+      });
+      if (!summary) {
+        excluded.push({ paperId: pid, reason: "no-summary" });
+        continue;
+      }
+
+      candidates.push({
+        paperId: pid,
+        title: paper.title ?? "",
+        authors: paper.authors ?? [],
+        year: paper.year ?? undefined,
+        summary: {
+          researchQuestion: summary.researchQuestion ?? "",
+          methodology: summary.methodology ?? "",
+          keyFindings: summary.keyFindings ?? [],
+          keywords: summary.keywords ?? [],
+        },
+      });
+      titleByPaper.set(pid, {
+        title: paper.title ?? "",
+        authors: paper.authors ?? [],
+        year: paper.year ?? undefined,
+      });
+    }
+
+    const language =
+      args.language ?? detectLanguage(paragraphText || selectionText, fallback);
+
+    if (candidates.length === 0) {
+      return {
+        recommendations: [] as EnrichedRecommendation[],
+        lowContext,
+        language,
+        excluded,
+      };
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(`${PYTHON_URL}/recommend-papers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Discriminator the Python service uses to swap the prompt template.
+          // Older Python builds that ignore `mode` and only read `inputText`
+          // still get a usable result because we still send `body`/`notes` —
+          // the selection text doubles as the body for fallback.
+          mode: "selection",
+          inputText: {
+            title: "",
+            body: selectionText,
+            notes: paragraphText,
+            selectionText,
+            paragraphText,
+          },
+          papers: candidates,
+          language,
+          provider,
+        }),
+      });
+    } catch (err) {
+      console.error("[recommendations] selection fetch failed:", err);
+      throw new Error("Recommendation service unreachable");
+    }
+
+    if (!response.ok) {
+      console.error(
+        "[recommendations] selection non-OK:",
+        response.status,
+        await response.text().catch(() => "")
+      );
+      throw new Error(`Recommendation service returned ${response.status}`);
+    }
+
+    const body_json = (await response.json()) as {
+      recommendations: RecommendationRow[];
+      lowContext?: boolean;
+    };
+
+    const enriched: EnrichedRecommendation[] = [];
+    for (const r of body_json.recommendations ?? []) {
+      const meta = titleByPaper.get(r.paperId);
+      if (!meta) continue;
+      enriched.push({
+        paperId: r.paperId,
+        score: r.score,
+        reasoning: r.reasoning,
+        title: meta.title,
+        authors: meta.authors,
+        year: meta.year,
+      });
+    }
+
+    return {
+      recommendations: enriched,
+      // Trust the local check first — the Python service may not understand
+      // selection-mode and might return its section-mode lowContext flag.
+      lowContext: lowContext || (body_json.lowContext ?? false),
+      language,
+      excluded,
+    };
+  },
+});

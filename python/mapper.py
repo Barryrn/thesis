@@ -8,13 +8,51 @@ MAX_TEXT_CHARS = 60_000
 LANGUAGE_NAMES = {"en": "English", "de": "German (Deutsch)"}
 
 
-def _build_score_prompt(language: str = "en") -> str:
+def _build_score_prompt(language: str = "en", single_section_mode: bool = False) -> str:
     lang_name = LANGUAGE_NAMES.get(language, "English")
     relevance_note_lang = (
         f" The relevanceNote MUST be written in {lang_name} — do NOT write relevance notes in English."
         if language != "en"
         else ""
     )
+    # On-demand citation mode: the user has already decided this paper belongs
+    # in the section. The LLM's job is to find supporting excerpts, not to
+    # second-guess the assignment with a strict relevance gate.
+    if single_section_mode:
+        return f"""You are extracting citation excerpts for a research paper that the user has explicitly assigned to ONE specific thesis section.
+The user has already decided this paper supports the section — your job is to find the verbatim excerpts that best support that decision, not to re-evaluate whether the paper belongs there.
+
+For the section provided:
+1. Score from 0.0 to 1.0 reflecting how strongly the paper supports the section. Use the section title and notes to judge. Default to a score of at least 0.5 because the user has assigned this paper here; only score lower if the paper text genuinely contains nothing connected to the section topic.
+2. Extract 3-6 verbatim excerpts (exact quotes) from the paper text that best support the assignment. Each excerpt should be 1-3 complete sentences. Aim for distinct, non-redundant evidence. If the paper truly contains nothing relevant, return an empty excerpts array — but this should be rare given the user explicitly chose this paper.
+3. For each excerpt, provide a brief relevance note explaining why it supports the section.{relevance_note_lang}
+
+Some sections include guidance notes (shown after the title in parentheses). These describe the author's intent for the section. Use them to pick the most relevant quotes.
+
+The paper text contains markers like "--- PAGE N ---" that indicate page boundaries. For each excerpt, identify the page it appears on and include it as "pageNumber" (e.g. "42"). If you cannot determine the page, omit "pageNumber".
+
+Return a JSON array only. No markdown, no explanation.
+Format:
+[
+  {{
+    "sectionId": "<the exact id value provided for the section>",
+    "score": <float>,
+    "excerpts": [
+      {{
+        "text": "<verbatim quote from paper>",
+        "relevanceNote": "<1-sentence explanation{' in ' + lang_name if language != 'en' else ''}>",
+        "pageNumber": "<page number as a string, e.g. \\"42\\">"
+      }}
+    ]
+  }}
+]
+
+Rules:
+- The sectionId MUST be the exact id string provided in the section list (e.g. "j5799ceg..."). Do NOT use the order number.
+- Excerpts MUST be exact quotes from the paper text provided. Do not paraphrase.
+- Each excerpt text should be 1-3 complete sentences.
+- Do NOT include "--- PAGE N ---" markers in the excerpt text itself."""
+
     return f"""You are mapping a research paper to thesis outline sections.
 For each section:
 1. Score from 0.0 to 1.0 based on relevance to the paper. Be strict: only score above 0.5 if the paper clearly belongs in that section.
@@ -52,9 +90,15 @@ Rules:
 
 def score_sections(
     summary: dict, sections: list[dict], paper_text: str = "", language: str = "en",
-    provider: str = "openai",
+    provider: str = "openai", single_section_mode: bool = False,
 ) -> list[dict]:
-    """Score thesis sections against a paper and extract supporting excerpts."""
+    """Score thesis sections against a paper and extract supporting excerpts.
+
+    When ``single_section_mode`` is True, a relaxed prompt is used that
+    assumes the user has already assigned the paper to the section — the
+    model is asked to extract supporting quotes rather than re-judge the
+    assignment with a strict 0.4 gate. Used by the ``/cite`` endpoint.
+    """
     # Build a lookup from orderNumber to _id for fallback resolution
     order_to_id = {s["orderNumber"]: s["_id"] for s in sections}
 
@@ -78,7 +122,7 @@ def score_sections(
         truncated = paper_text[:MAX_TEXT_CHARS]
         user_message += f"\n\nPaper full text (for excerpt extraction):\n{truncated}"
 
-    system_prompt = _build_score_prompt(language)
+    system_prompt = _build_score_prompt(language, single_section_mode=single_section_mode)
     logger = get_logger()
     logger.info(f"Scoring {len(sections)} sections against paper", extra={"step": "score_sections"})
 
@@ -118,6 +162,12 @@ def score_sections(
                     "pageNumber": exc.get("pageNumber"),
                 })
         item["excerpts"] = validated_excerpts
+        # In on-demand citation mode the user has already assigned the paper
+        # to the section — if the model produced excerpts but emitted a low
+        # score, floor it so the downstream `score > 0.0` filter doesn't
+        # discard the user's intentional assignment.
+        if single_section_mode and validated_excerpts and item["score"] < 0.5:
+            item["score"] = 0.5
 
     # Filter out entries with unresolvable sectionIds
     scores = [s for s in scores if s["sectionId"] in valid_ids]

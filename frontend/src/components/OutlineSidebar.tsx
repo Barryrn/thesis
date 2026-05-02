@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useQuery } from "convex/react";
@@ -6,8 +6,9 @@ import { useDroppable } from "@dnd-kit/core";
 import { api } from "../../convex/_generated/api";
 import { buildSectionTree } from "@/lib/treeBuilder";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Pencil, StickyNote } from "lucide-react";
+import { Loader2, Pencil, StickyNote, Zap } from "lucide-react";
 import type { ActiveSection, SectionId, SectionTreeNode } from "@/lib/types";
+import BatchGeneratePanel from "@/components/BatchGeneratePanel";
 
 interface OutlineSidebarProps {
   activeSection: ActiveSection | null;
@@ -21,6 +22,10 @@ export default function OutlineSidebar({
   onSelectSection,
   citingSections,
 }: OutlineSidebarProps) {
+  /// Currently-open batch panel root, or null when no panel is open.
+  /// Owned at sidebar level so opening one ⚡ closes any other panel
+  /// without each row needing its own state machine.
+  const [batchRoot, setBatchRoot] = useState<SectionTreeNode | null>(null);
   const { t } = useTranslation();
   const sections = useQuery(api.outline.listSections) ?? [];
   const tree = useMemo(() => buildSectionTree(sections), [sections]);
@@ -58,11 +63,19 @@ export default function OutlineSidebar({
                 activeSection={activeSection}
                 onSelectSection={onSelectSection}
                 citingSections={citingSections}
+                onBatchGenerate={setBatchRoot}
               />
             ))}
           </div>
         )}
       </div>
+
+      {batchRoot && (
+        <BatchGeneratePanel
+          rootNode={batchRoot}
+          onClose={() => setBatchRoot(null)}
+        />
+      )}
     </div>
   );
 }
@@ -73,6 +86,9 @@ interface SidebarSectionNodeProps {
   activeSection: ActiveSection | null;
   onSelectSection: (section: ActiveSection | null) => void;
   citingSections: Set<SectionId>;
+  /// Open the batch-generate panel rooted at this node. Clicking the ⚡
+  /// button on any row routes here so only one panel is ever open.
+  onBatchGenerate: (node: SectionTreeNode) => void;
 }
 
 function SidebarSectionNode({
@@ -81,6 +97,7 @@ function SidebarSectionNode({
   activeSection,
   onSelectSection,
   citingSections,
+  onBatchGenerate,
 }: SidebarSectionNodeProps) {
   const { t } = useTranslation();
   const matches = useQuery(api.matches.getMatchesBySection, {
@@ -100,7 +117,7 @@ function SidebarSectionNode({
   const isActive = activeSection?.sectionId === node._id;
 
   return (
-    <div ref={setNodeRef}>
+    <div ref={setNodeRef} className="group/row relative">
       <button
         onClick={() =>
           onSelectSection(
@@ -115,7 +132,7 @@ function SidebarSectionNode({
                 }
           )
         }
-        className={`w-full text-left flex items-center gap-1.5 py-1.5 px-2 rounded-md text-sm transition-all group ${
+        className={`w-full text-left flex items-center gap-1.5 py-1.5 px-2 rounded-md text-sm transition-all ${
           isActive
             ? "bg-amber/10 border-l-2 border-amber text-foreground"
             : isOver
@@ -136,6 +153,9 @@ function SidebarSectionNode({
             title={node.notes}
           />
         )}
+        {/* ⚡ Generate-subtree affordance — visible on row hover. The
+            click handler is on a sibling button overlaying the row's
+            right edge so it doesn't trigger the row's onSelectSection. */}
         {/* Spinner shown while /cite is running for this section */}
         {isCiting ? (
           <Loader2 className="size-3 text-amber animate-spin shrink-0" title={t("outlineSidebar.extractingCitations")} />
@@ -155,6 +175,22 @@ function SidebarSectionNode({
         )}
       </button>
 
+      {/* ⚡ batch-generate trigger. Sibling of the row button so its click
+          does not bubble through to onSelectSection. Hidden until the row
+          is hovered to keep the sidebar visually quiet at rest. */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onBatchGenerate(node);
+        }}
+        title={`Generate this section${node.children.length > 0 ? " and its subsections" : ""}`}
+        aria-label="Generate subtree"
+        className="absolute right-1 top-1.5 size-5 rounded flex items-center justify-center text-amber-dim opacity-0 group-hover/row:opacity-100 hover:bg-amber/10 hover:text-amber transition"
+      >
+        <Zap className="size-3" />
+      </button>
+
       {node.children.length > 0 && (
         <div className="relative ml-3 border-l border-sidebar-border/50">
           {node.children.map((child) => (
@@ -165,6 +201,7 @@ function SidebarSectionNode({
               activeSection={activeSection}
               onSelectSection={onSelectSection}
               citingSections={citingSections}
+              onBatchGenerate={onBatchGenerate}
             />
           ))}
         </div>

@@ -14,7 +14,7 @@
 /// autosave path.
 import { useCallback, useRef, useState } from "react";
 import { PYTHON_SERVICE_URL } from "@/lib/config";
-import { replacePendingMarker } from "@/lib/citationUtils";
+import { buildCitationMarker, replacePendingMarker } from "@/lib/citationUtils";
 import type { CitationType, PendingCitation } from "@/lib/types";
 
 /// One candidate ranking from the validate endpoint.
@@ -85,13 +85,20 @@ export interface UseValidateCitations {
   wasCancelled: () => boolean;
 }
 
-/// Builds a {{cite:...}} marker for an auto-promoted resolution.
+/// Builds a {{cite:...}} marker for an auto-promoted resolution. Auto-promotes
+/// originate from the AI validate phase, so they're always tagged `origin:ai`
+/// — surfaces in the editor with the AI tint distinct from manual @-inserts.
 function buildResolvedMarker(
   paperId: string,
   citationType: CitationType,
   pageRef: string
 ): string {
-  return `{{cite:${paperId}::${citationType}::${pageRef}}}`;
+  return buildCitationMarker({
+    paperId,
+    citationType,
+    pageRef,
+    origin: "ai",
+  });
 }
 
 export function useValidateCitations(
